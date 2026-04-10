@@ -46,6 +46,7 @@ dp = Dispatcher(storage=MemoryStorage())
 active_attacks = {}
 sessions_pool = []
 sessions_ready = False
+sessions_init_task = None
 
 class AttackState(StatesGroup):
     waiting_phone = State()
@@ -323,9 +324,11 @@ def count_existing_sessions() -> int:
             count += 1
     return count
 
-async def init_sessions():
-    """Инициализация и дополнение сессий до нужного количества"""
+async def init_sessions_background():
+    """Фоновая инициализация и дополнение сессий"""
     global sessions_pool, sessions_ready
+    
+    logger.info("Запуск фоновой инициализации сессий...")
     
     os.makedirs("sessions", exist_ok=True)
     
@@ -371,7 +374,7 @@ async def init_sessions():
             except Exception as e:
                 logger.error(f"Ошибка загрузки сессии {i}: {e}")
     
-    logger.info(f"Итого загружено {len(sessions_pool)}/{MAX_SESSIONS} сессий")
+    logger.info(f"Инициализация сессий завершена. Загружено {len(sessions_pool)}/{MAX_SESSIONS} сессий")
     sessions_ready = True
 
 async def get_available_sessions(count: int) -> list:
@@ -626,6 +629,7 @@ async def cmd_start(message: types.Message):
     caption = (
         "<b>VICTIM SNOS v3.0</b>\n\n"
         f"Сессий: {len(sessions_pool)}/{MAX_SESSIONS}\n"
+        f"Готовность: {'Да' if sessions_ready else 'Загрузка...'}\n"
         f"Сайтов TG: {len(TELEGRAM_AUTH_SITES)}\n"
         f"Сайтов бомбера: {len(BOMBER_WEBSITES)}\n"
         f"Задержка: {BOMBER_DELAY} сек\n\n"
@@ -645,7 +649,7 @@ async def cmd_start(message: types.Message):
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     
-    caption = f"<b>VICTIM SNOS - Главное меню</b>\n\nСессий: {len(sessions_pool)}/{MAX_SESSIONS}"
+    caption = f"<b>VICTIM SNOS - Главное меню</b>\n\nСессий: {len(sessions_pool)}/{MAX_SESSIONS}\nГотовность: {'Да' if sessions_ready else 'Загрузка...'}"
     
     if os.path.exists(BANNER_PATH):
         await callback.message.delete()
@@ -664,8 +668,8 @@ async def sessions_status(callback: types.CallbackQuery):
     await callback.message.edit_text(
         f"<b>СТАТУС СЕССИЙ</b>\n\n"
         f"Загружено: {len(sessions_pool)}/{MAX_SESSIONS}\n"
-        f"Готовность: {'Да' if sessions_ready else 'Нет'}\n\n"
-        f"Для дополнения сессий перезапустите бота.",
+        f"Готовность: {'Да' if sessions_ready else 'Идет загрузка...'}\n\n"
+        f"Сессии загружаются в фоне.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
         ])
@@ -675,7 +679,11 @@ async def sessions_status(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "tg_attack")
 async def tg_attack_start(callback: types.CallbackQuery, state: FSMContext):
     if not sessions_ready:
-        await callback.answer("Сессии еще не загружены!", show_alert=True)
+        await callback.answer("Сессии еще загружаются, подождите...", show_alert=True)
+        return
+    
+    if len(sessions_pool) == 0:
+        await callback.answer("Нет доступных сессий!", show_alert=True)
         return
     
     await state.set_state(AttackState.waiting_phone)
@@ -692,7 +700,7 @@ async def tg_attack_start(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "bomber_attack")
 async def bomber_attack_start(callback: types.CallbackQuery, state: FSMContext):
     if not sessions_ready:
-        await callback.answer("Сессии еще не загружены!", show_alert=True)
+        await callback.answer("Сессии еще загружаются, подождите...", show_alert=True)
         return
     
     await state.set_state(BomberState.waiting_phone)
@@ -866,33 +874,34 @@ mail_tm = MailTM()
 async def main():
     logger.info("VICTIM SNOS v3.0 запуск...")
     
-    # Сначала запускаем бота
+    # Удаляем вебхук
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Запускаем polling в фоне
-    polling_task = asyncio.create_task(dp.start_polling(bot))
+    # Запускаем фоновую инициализацию сессий
+    asyncio.create_task(init_sessions_background())
     
-    # Параллельно инициализируем сессии
-    logger.info(f"Проверка и инициализация {MAX_SESSIONS} сессий...")
-    await init_sessions()
-    logger.info(f"Сессии готовы: {len(sessions_pool)}/{MAX_SESSIONS}")
-    
-    # Инициализация mail.tm
+    # Инициализация mail.tm (тоже в фоне, но быстрее)
     if USE_MAILTM:
         try:
             with open('mailtm_accounts.json', 'r') as f:
                 mail_tm.accounts = json.load(f)
                 logger.info(f"Загружено {len(mail_tm.accounts)} mail.tm аккаунтов")
         except:
-            accounts = await mail_tm.create_multiple_accounts(MAILTM_ACCOUNTS_COUNT)
-            with open('mailtm_accounts.json', 'w') as f:
-                json.dump(accounts, f)
-            mail_tm.accounts = accounts
+            logger.info("Создание mail.tm аккаунтов...")
+            asyncio.create_task(create_mailtm_accounts())
     
-    logger.info("VICTIM SNOS полностью готов к работе!")
+    logger.info("Бот запущен и готов к работе!")
     
-    # Ждем завершения polling
-    await polling_task
+    # Запускаем polling (блокирующий вызов)
+    await dp.start_polling(bot)
+
+async def create_mailtm_accounts():
+    """Фоновое создание mail.tm аккаунтов"""
+    accounts = await mail_tm.create_multiple_accounts(MAILTM_ACCOUNTS_COUNT)
+    with open('mailtm_accounts.json', 'w') as f:
+        json.dump(accounts, f)
+    mail_tm.accounts = accounts
+    logger.info(f"Создано {len(accounts)} mail.tm аккаунтов")
 
 if __name__ == "__main__":
     asyncio.run(main())
