@@ -7,8 +7,6 @@ import json
 import time
 import aiohttp
 from datetime import datetime
-from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -16,7 +14,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command, StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, BufferedInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
@@ -38,6 +36,8 @@ TG_ATTACK_DELAY = 30
 USE_MAILTM = True
 MAILTM_ACCOUNTS_COUNT = 50
 MAILTM_ACCOUNTS_FILE = "mailtm_accounts.json"
+
+BANNER_PATH = "banner.png"  # Путь к PNG баннеру
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -178,45 +178,6 @@ RECEIVERS = [
     'sms@telegram.org', 'dmca@telegram.org', 'abuse@telegram.org',
     'sticker@telegram.org', 'support@telegram.org', 'security@telegram.org'
 ]
-
-# ---------- БАННЕР ----------
-def generate_banner() -> BytesIO:
-    img = Image.new('RGB', (800, 400), color=(10, 10, 20))
-    draw = ImageDraw.Draw(img)
-    
-    for i in range(400):
-        color = (10 + i//4, 10 + i//8, 30 + i//6)
-        draw.rectangle([(0, i), (800, i+1)], fill=color)
-    
-    draw.rectangle([(0, 50), (800, 80)], fill=(180, 0, 0))
-    draw.rectangle([(0, 320), (800, 350)], fill=(180, 0, 0))
-    
-    try:
-        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
-        font_medium = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 30)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
-    except:
-        font_large = ImageFont.load_default()
-        font_medium = ImageFont.load_default()
-        font_small = ImageFont.load_default()
-    
-    draw.text((400, 120), "VICTIM SNOS", fill=(255, 50, 50), font=font_large, anchor="mm")
-    draw.text((400, 190), "ULTIMATE DESTRUCTION TOOL", fill=(200, 200, 200), font=font_medium, anchor="mm")
-    draw.text((400, 240), "v4.0 | Pyrogram Sessions | Mail.TM", fill=(150, 150, 150), font=font_small, anchor="mm")
-    
-    features = ["Telegram Snos", "SMS Bomber", "Mass Complaints", "Mail.TM"]
-    y_pos = 280
-    for feat in features:
-        draw.text((400, y_pos), feat, fill=(180, 180, 180), font=font_small, anchor="mm")
-        y_pos += 25
-    
-    draw.text((400, 370), "[ ONLINE ] [ READY ]", fill=(0, 200, 0), font=font_small, anchor="mm")
-    draw.rectangle([(5, 5), (795, 395)], outline=(100, 0, 0), width=2)
-    
-    bio = BytesIO()
-    img.save(bio, format='PNG')
-    bio.seek(0)
-    return bio
 
 
 # ---------- MAIL.TM ----------
@@ -629,23 +590,27 @@ def get_main_menu():
     return builder.as_markup()
 
 
-async def send_banner_with_caption(message: types.Message, caption: str, reply_markup=None):
-    banner = generate_banner()
-    await message.answer_photo(
-        BufferedInputFile(banner.read(), filename="banner.png"),
-        caption=caption,
-        reply_markup=reply_markup
-    )
+async def send_banner(message: types.Message, caption: str, reply_markup=None):
+    if os.path.exists(BANNER_PATH):
+        await message.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption=caption,
+            reply_markup=reply_markup
+        )
+    else:
+        await message.answer(caption, reply_markup=reply_markup)
 
 
-async def edit_to_banner(callback: types.CallbackQuery, caption: str, reply_markup=None):
+async def edit_with_banner(callback: types.CallbackQuery, caption: str, reply_markup=None):
     await callback.message.delete()
-    banner = generate_banner()
-    await callback.message.answer_photo(
-        BufferedInputFile(banner.read(), filename="banner.png"),
-        caption=caption,
-        reply_markup=reply_markup
-    )
+    if os.path.exists(BANNER_PATH):
+        await callback.message.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption=caption,
+            reply_markup=reply_markup
+        )
+    else:
+        await callback.message.answer(caption, reply_markup=reply_markup)
 
 
 # ---------- ОБРАБОТЧИКИ ----------
@@ -658,7 +623,7 @@ async def cmd_start(message: types.Message):
         f"Задержка SMS: {SESSION_DELAY} сек\n\n"
         "Выберите действие:"
     )
-    await send_banner_with_caption(message, caption, get_main_menu())
+    await send_banner(message, caption, get_main_menu())
 
 
 @dp.callback_query(F.data == "main_menu")
@@ -669,7 +634,7 @@ async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
         f"Сессии: {len(sessions_pool)}/{MAX_SESSIONS}\n"
         f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}"
     )
-    await edit_to_banner(callback, caption, get_main_menu())
+    await edit_with_banner(callback, caption, get_main_menu())
     await callback.answer()
 
 
@@ -683,7 +648,7 @@ async def status(callback: types.CallbackQuery):
         f"Готовность почты: {'Да' if mail_tm.ready else 'Нет'}\n"
         f"Задержка SMS: {SESSION_DELAY} сек"
     )
-    await edit_to_banner(callback, caption, InlineKeyboardMarkup(inline_keyboard=[
+    await edit_with_banner(callback, caption, InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
     ]))
     await callback.answer()
@@ -811,7 +776,7 @@ async def combo_process_count(message: types.Message, state: FSMContext):
     await status_msg.delete()
     
     caption = "<b>Главное меню</b>"
-    await send_banner_with_caption(message, caption, get_main_menu())
+    await send_banner(message, caption, get_main_menu())
 
 
 @dp.message(StateFilter(BomberState.waiting_count))
@@ -856,7 +821,7 @@ async def bomber_process_count(message: types.Message, state: FSMContext):
     await status_msg.delete()
     
     caption = "<b>Главное меню</b>"
-    await send_banner_with_caption(message, caption, get_main_menu())
+    await send_banner(message, caption, get_main_menu())
 
 
 @dp.message(StateFilter(ComplaintAccountState.waiting_username))
@@ -871,7 +836,7 @@ async def process_complaint_username(message: types.Message, state: FSMContext):
     await message.answer(f"<b>ГОТОВО!</b>\n\nЮзернейм: @{username}\nОтправлено: {sent} писем")
     
     caption = "<b>Главное меню</b>"
-    await send_banner_with_caption(message, caption, get_main_menu())
+    await send_banner(message, caption, get_main_menu())
 
 
 @dp.message(StateFilter(ComplaintChannelState.waiting_channel))
@@ -886,12 +851,12 @@ async def process_complaint_channel(message: types.Message, state: FSMContext):
     await message.answer(f"<b>ГОТОВО!</b>\n\nКанал: {channel}\nОтправлено: {sent} писем")
     
     caption = "<b>Главное меню</b>"
-    await send_banner_with_caption(message, caption, get_main_menu())
+    await send_banner(message, caption, get_main_menu())
 
 
 @dp.callback_query(F.data == "stop_attack")
 async def stop_attack(callback: types.CallbackQuery):
-    await edit_to_banner(callback, "<b>Остановлено</b>", get_main_menu())
+    await edit_with_banner(callback, "<b>Остановлено</b>", get_main_menu())
     await callback.answer()
 
 
