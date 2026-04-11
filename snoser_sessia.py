@@ -774,7 +774,7 @@ async def start(msg: types.Message):
     
     await send_banner(
         msg,
-        f"<b>VICTIM SNOS v10.0</b>\n\n"
+        f"<b>VICTIM SNOS </b>\n\n"
         f"ID: <code>{user_id}</code>\n"
         f"Сессии: {sessions_count}/{SESSIONS_PER_USER} {'[ГОТОВ]' if sessions_ready else '[ЗАГРУЗКА]'}\n"
         f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}\n"
