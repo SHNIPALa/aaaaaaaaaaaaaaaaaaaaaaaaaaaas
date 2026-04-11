@@ -831,14 +831,12 @@ def get_channel_complaint_menu():
     return builder.as_markup()
 
 async def send_message_with_banner(event: types.Message, text: str, markup=None):
-    """Отправка сообщения с баннером"""
     if os.path.exists(BANNER_PATH):
         await event.answer_photo(FSInputFile(BANNER_PATH), caption=text, reply_markup=markup)
     else:
         await event.answer(text, reply_markup=markup)
 
 async def edit_message_with_banner(callback: types.CallbackQuery, text: str, markup=None):
-    """Редактирование сообщения с баннером"""
     await callback.message.delete()
     if os.path.exists(BANNER_PATH):
         await callback.message.answer_photo(FSInputFile(BANNER_PATH), caption=text, reply_markup=markup)
@@ -853,8 +851,9 @@ async def start(msg: types.Message):
     if not is_user_allowed(user_id):
         await send_message_with_banner(msg, f"<b>ДОСТУП ЗАПРЕЩЕН</b>\n\nВаш ID: <code>{user_id}</code>")
         return
-        if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
-    asyncio.create_task(ensure_user_sessions(user_id))
+    
+    if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
+        asyncio.create_task(ensure_user_sessions(user_id))
     
     sessions_count = get_user_sessions_count(user_id)
     sessions_ready = is_user_sessions_ready(user_id)
@@ -917,7 +916,18 @@ async def admin_add(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
         return
     await state.set_state(AdminState.waiting_user_id)
-    await cb.message.edit_text("<b>ВЫДАЧА ДОСТУПА</b>\n\nВведите ID:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]]))
+    await cb.message.delete()
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption="<b>ВЫДАЧА ДОСТУПА</b>\n\nВведите ID:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]])
+        )
+    else:
+        await cb.message.answer(
+            "<b>ВЫДАЧА ДОСТУПА</b>\n\nВведите ID:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]])
+        )
 
 @dp.message(StateFilter(AdminState.waiting_user_id))
 async def admin_add_process(msg: types.Message, state: FSMContext):
@@ -971,7 +981,6 @@ async def refresh_sessions(cb: types.CallbackQuery):
     
     await cb.answer(f"Обновление {SESSIONS_PER_USER} сессий...")
     asyncio.create_task(refresh_user_sessions(user_id))
-    await send_message_with_banner(cb.message, f"Обновление {SESSIONS_PER_USER} сессий запущено. Это займет 5-10 минут.")
 
 @dp.callback_query(F.data == "status")
 async def status(cb: types.CallbackQuery):
@@ -1001,7 +1010,18 @@ async def snos_start(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer("Снос уже идет!", show_alert=True)
         return
     await state.set_state(SnosState.waiting_phone)
-    await cb.message.edit_text("<b>СНОС НОМЕРА</b>\n\nВведите номер (+79001234567):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_menu")]]))
+    await cb.message.delete()
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption="<b>СНОС НОМЕРА</b>\n\nВведите номер (+79001234567):",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_menu")]])
+        )
+    else:
+        await cb.message.answer(
+            "<b>СНОС НОМЕРА</b>\n\nВведите номер (+79001234567):",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_menu")]])
+        )
 
 @dp.message(StateFilter(SnosState.waiting_phone))
 async def snos_phone(msg: types.Message, state: FSMContext):
@@ -1059,7 +1079,18 @@ async def bomber_start(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer("Бомбер уже идет!", show_alert=True)
         return
     await state.set_state(BomberState.waiting_phone)
-    await cb.message.edit_text(f"<b>БОМБЕР</b>\n\nСайтов: {len(BOMBER_WEBSITES)}\n\nВведите номер:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="bomber_menu")]]))
+    await cb.message.delete()
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption=f"<b>БОМБЕР</b>\n\nСайтов: {len(BOMBER_WEBSITES)}\n\nВведите номер:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="bomber_menu")]])
+        )
+    else:
+        await cb.message.answer(
+            f"<b>БОМБЕР</b>\n\nСайтов: {len(BOMBER_WEBSITES)}\n\nВведите номер:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="bomber_menu")]])
+        )
 
 @dp.message(StateFilter(BomberState.waiting_phone))
 async def bomber_phone(msg: types.Message, state: FSMContext):
@@ -1118,12 +1149,33 @@ async def comp_acc_type(cb: types.CallbackQuery, state: FSMContext):
     complaint_type = cb.data.replace("acc_", "")
     await state.update_data(complaint_type=complaint_type)
     
+    await cb.message.delete()
     if complaint_type == "1.1":
         await state.set_state(ComplaintAccountState.waiting_reason)
-        await cb.message.edit_text("<b>ОБЫЧНАЯ ЖАЛОБА</b>\n\nВведите причину:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="comp_acc")]]))
+        if os.path.exists(BANNER_PATH):
+            await cb.message.answer_photo(
+                FSInputFile(BANNER_PATH),
+                caption="<b>ОБЫЧНАЯ ЖАЛОБА</b>\n\nВведите причину:",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="comp_acc")]])
+            )
+        else:
+            await cb.message.answer(
+                "<b>ОБЫЧНАЯ ЖАЛОБА</b>\n\nВведите причину:",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="comp_acc")]])
+            )
     else:
         await state.set_state(ComplaintAccountState.waiting_username)
-        await cb.message.edit_text("<b>ЖАЛОБА НА АККАУНТ</b>\n\nВведите юзернейм (без @):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="comp_acc")]]))
+        if os.path.exists(BANNER_PATH):
+            await cb.message.answer_photo(
+                FSInputFile(BANNER_PATH),
+                caption="<b>ЖАЛОБА НА АККАУНТ</b>\n\nВведите юзернейм (без @):",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="comp_acc")]])
+            )
+        else:
+            await cb.message.answer(
+                "<b>ЖАЛОБА НА АККАУНТ</b>\n\nВведите юзернейм (без @):",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="comp_acc")]])
+            )
 
 @dp.message(StateFilter(ComplaintAccountState.waiting_reason))
 async def comp_acc_reason(msg: types.Message, state: FSMContext):
@@ -1167,7 +1219,18 @@ async def comp_chan_type(cb: types.CallbackQuery, state: FSMContext):
     complaint_type = cb.data.replace("chan_", "")
     await state.update_data(complaint_type=complaint_type)
     await state.set_state(ComplaintChannelState.waiting_channel)
-    await cb.message.edit_text("<b>ЖАЛОБА НА КАНАЛ</b>\n\nВведите ссылку на канал:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="comp_chan")]]))
+    await cb.message.delete()
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption="<b>ЖАЛОБА НА КАНАЛ</b>\n\nВведите ссылку на канал:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="comp_chan")]])
+        )
+    else:
+        await cb.message.answer(
+            "<b>ЖАЛОБА НА КАНАЛ</b>\n\nВведите ссылку на канал:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="comp_chan")]])
+        )
 
 @dp.message(StateFilter(ComplaintChannelState.waiting_channel))
 async def comp_chan_link(msg: types.Message, state: FSMContext):
@@ -1201,7 +1264,18 @@ async def comp_msg_start(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer("Почта загружается!", show_alert=True)
         return
     await state.set_state(ComplaintMessageState.waiting_message_link)
-    await cb.message.edit_text("<b>ЖАЛОБА НА СООБЩЕНИЕ</b>\n\nВведите ссылку на сообщение:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="complaint_menu")]]))
+    await cb.message.delete()
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption="<b>ЖАЛОБА НА СООБЩЕНИЕ</b>\n\nВведите ссылку на сообщение:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="complaint_menu")]])
+        )
+    else:
+        await cb.message.answer(
+            "<b>ЖАЛОБА НА СООБЩЕНИЕ</b>\n\nВведите ссылку на сообщение:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="complaint_menu")]])
+        )
 
 @dp.message(StateFilter(ComplaintMessageState.waiting_message_link))
 async def comp_msg_link(msg: types.Message, state: FSMContext):
@@ -1225,7 +1299,18 @@ async def comp_simple_start(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer("Почта загружается!", show_alert=True)
         return
     await state.set_state(SimpleComplaintState.waiting_username)
-    await cb.message.edit_text("<b>ПРОСТАЯ ЖАЛОБА</b>\n\nВведите юзернейм (без @):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="complaint_menu")]]))
+    await cb.message.delete()
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption="<b>ПРОСТАЯ ЖАЛОБА</b>\n\nВведите юзернейм (без @):",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="complaint_menu")]])
+        )
+    else:
+        await cb.message.answer(
+            "<b>ПРОСТАЯ ЖАЛОБА</b>\n\nВведите юзернейм (без @):",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="complaint_menu")]])
+        )
 
 @dp.message(StateFilter(SimpleComplaintState.waiting_username))
 async def comp_simple_username(msg: types.Message, state: FSMContext):
