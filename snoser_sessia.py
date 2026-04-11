@@ -1044,35 +1044,55 @@ async def bomber_count(msg: types.Message, state: FSMContext):
     
     await send_message_with_banner(msg, "<b>BOMBER COMPLETED</b>", get_main_menu())
 
-@dp.callback_query(F.data == "report_msg")
-async def report_msg_start(cb: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("reason_"))
+async def report_msg_reason(cb: types.CallbackQuery, state: FSMContext):
+    reason = cb.data.replace("reason_", "")
+    data = await state.get_data()
+    link = data["link"]
     user_id = cb.from_user.id
+    await state.clear()
     
-    if not await check_channel_subscription(user_id):
-        await cb.answer("Subscribe first!", show_alert=True)
-        return
+    await cb.message.delete()
     
-    if not is_user_sessions_ready(user_id):
-        await cb.answer("Sessions loading!", show_alert=True)
-        return
+    active_reports[user_id] = True
+    
+    if os.path.exists(BANNER_PATH):
+        st = await cb.message.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption="<b>REPORTING...</b>"
+        )
+    else:
+        st = await cb.message.answer("<b>REPORTING...</b>")
+    
+    async def prog(reported):
+        try:
+            if os.path.exists(BANNER_PATH):
+                await st.edit_caption(caption=f"<b>REPORTING</b>\n\nSent: {reported}")
+            else:
+                await st.edit_text(f"<b>REPORTING</b>\n\nSent: {reported}")
+        except:
+            pass
+    
+    ok, error = await mass_report_message(user_id, link, reason, prog)
+    
+    await st.delete()
     
     if user_id in active_reports:
-        await cb.answer("Report in progress!", show_alert=True)
-        return
+        del active_reports[user_id]
     
-    await state.set_state(ReportMessageState.waiting_link)
-    await cb.message.delete()
+    if error:
+        await cb.message.answer(f"<b>ERROR</b>\n\n{error}")
+    else:
+        await cb.message.answer(f"<b>REPORT SENT</b>")
+    
     if os.path.exists(BANNER_PATH):
         await cb.message.answer_photo(
             FSInputFile(BANNER_PATH),
-            caption="<b>REPORT MESSAGE</b>\n\nEnter message link:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="report_menu")]])
+            caption="<b>VICTIM SNOS</b>",
+            reply_markup=get_main_menu()
         )
     else:
-        await cb.message.answer(
-            "<b>REPORT MESSAGE</b>\n\nEnter message link:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="report_menu")]])
-        )
+        await cb.message.answer("<b>VICTIM SNOS</b>", reply_markup=get_main_menu())
 
 @dp.message(StateFilter(ReportMessageState.waiting_link))
 async def report_msg_link(msg: types.Message, state: FSMContext):
@@ -1080,7 +1100,16 @@ async def report_msg_link(msg: types.Message, state: FSMContext):
     await state.update_data(link=link)
     await state.set_state(ReportMessageState.waiting_reason)
     await msg.delete()
-    await edit_message_with_banner_msg(msg, "<b>SELECT REASON</b>", get_report_reason_menu())
+    
+    # Отправляем новое сообщение с выбором причины
+    if os.path.exists(BANNER_PATH):
+        await msg.answer_photo(
+            FSInputFile(BANNER_PATH),
+            caption="<b>SELECT REASON</b>",
+            reply_markup=get_report_reason_menu()
+        )
+    else:
+        await msg.answer("<b>SELECT REASON</b>", reply_markup=get_report_reason_menu())
 
 async def edit_message_with_banner_msg(msg: types.Message, text: str, markup=None):
     if os.path.exists(BANNER_PATH):
