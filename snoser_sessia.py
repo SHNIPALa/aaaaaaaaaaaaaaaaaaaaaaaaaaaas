@@ -29,13 +29,13 @@ API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
 ALLOWED_USERS_FILE = "allowed_users.json"
 
-SESSIONS_PER_USER = 200
+SESSIONS_PER_USER = 500  # 500 сессий на пользователя
 SESSION_DELAY = 60
-SMS_PER_ROUND = 5
+SMS_PER_ROUND = 10  # Увеличено до 10 за раунд
 ROUND_DELAY = 10
 BOMBER_DELAY = 3
 
-MAILTM_ACCOUNTS_COUNT = 30
+MAILTM_ACCOUNTS_COUNT = 50
 MAILTM_ACCOUNTS_FILE = "mailtm_accounts.json"
 BANNER_PATH = "banner.png"
 
@@ -271,12 +271,11 @@ class MailTM:
             return False
 
 
-# ---------- ИСПРАВЛЕННОЕ СОЗДАНИЕ СЕССИЙ ----------
+# ---------- СЕССИИ ----------
 def get_user_session_dir(user_id: int) -> str:
     return f"sessions/user_{user_id}"
 
 def count_user_sessions_files(user_id: int) -> int:
-    """Подсчет существующих файлов сессий пользователя"""
     session_dir = get_user_session_dir(user_id)
     if not os.path.exists(session_dir):
         return 0
@@ -288,7 +287,6 @@ def count_user_sessions_files(user_id: int) -> int:
     return count
 
 async def create_single_session(session_file: str, idx: int) -> dict:
-    """Создание одной сессии"""
     try:
         client = Client(
             session_file, 
@@ -307,10 +305,6 @@ async def create_single_session(session_file: str, idx: int) -> dict:
         return None
 
 async def create_user_sessions(user_id: int, start_from: int = 0) -> tuple:
-    """
-    Создает сессии для пользователя начиная с указанного индекса
-    Возвращает (новые_сессии, всего_создано)
-    """
     session_dir = get_user_session_dir(user_id)
     os.makedirs(session_dir, exist_ok=True)
     
@@ -337,7 +331,7 @@ async def create_user_sessions(user_id: int, start_from: int = 0) -> tuple:
     if need_to_create > 0:
         logger.info(f"Пользователь {user_id}: нужно создать еще {need_to_create} сессий")
         
-        batch_size = 10  # Уменьшенный размер батча для стабильности
+        batch_size = 10
         for batch_start in range(len(sessions), SESSIONS_PER_USER, batch_size):
             batch_end = min(batch_start + batch_size, SESSIONS_PER_USER)
             tasks = []
@@ -347,7 +341,6 @@ async def create_user_sessions(user_id: int, start_from: int = 0) -> tuple:
                 if not os.path.exists(f"{session_file}.session"):
                     tasks.append(create_single_session(session_file, i))
                 else:
-                    # Если файл есть, но сессия не загружена - загружаем
                     sess = await create_single_session(session_file, i)
                     if sess:
                         sessions.append(sess)
@@ -359,12 +352,11 @@ async def create_user_sessions(user_id: int, start_from: int = 0) -> tuple:
                         sessions.append(r)
             
             logger.info(f"Пользователь {user_id}: создано {len(sessions)}/{SESSIONS_PER_USER} сессий")
-            await asyncio.sleep(2)  # Пауза между батчами
+            await asyncio.sleep(2)
     
     return sessions, len(sessions)
 
 async def ensure_user_sessions(user_id: int):
-    """Проверяет и создает сессии для пользователя"""
     if user_id in sessions_creation_lock and sessions_creation_lock[user_id]:
         logger.info(f"Пользователь {user_id}: сессии уже создаются")
         return
@@ -385,7 +377,6 @@ async def ensure_user_sessions(user_id: int):
         sessions_creation_lock[user_id] = False
 
 async def refresh_user_sessions(user_id: int):
-    """Полное обновление сессий пользователя"""
     logger.info(f"Обновление сессий для пользователя {user_id}...")
     
     if user_id in user_sessions:
@@ -398,17 +389,14 @@ async def refresh_user_sessions(user_id: int):
         if old_data.get("task") and not old_data["task"].done():
             old_data["task"].cancel()
     
-    # Удаляем старую папку
     session_dir = get_user_session_dir(user_id)
     if os.path.exists(session_dir):
         shutil.rmtree(session_dir)
     
-    # Создаем заново
     user_sessions[user_id] = {"sessions": [], "ready": False, "task": None, "total": 0}
     await ensure_user_sessions(user_id)
 
 async def get_user_sessions_batch(user_id: int, count: int) -> list:
-    """Получает несколько доступных сессий"""
     if user_id not in user_sessions or not user_sessions[user_id]["ready"]:
         return []
     
@@ -588,7 +576,7 @@ async def send_mass_complaint(mail_tm: MailTM, subject: str, body: str) -> int:
             return result
     
     tasks = []
-    for acc in mail_tm.accounts[:15]:
+    for acc in mail_tm.accounts[:20]:
         for rec in RECEIVERS[:3]:
             tasks.append(send_one(acc, rec))
     
@@ -749,17 +737,16 @@ async def start(msg: types.Message):
         await msg.answer(f"<b>ДОСТУП ЗАПРЕЩЕН</b>\n\nВаш ID: <code>{user_id}</code>")
         return
     
-    # Запускаем создание сессий в фоне
     if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
         asyncio.create_task(ensure_user_sessions(user_id))
-        await msg.answer("Запущено создание сессий. Это займет 3-5 минут...")
+        await msg.answer("Запущено создание 500 сессий. Это займет 5-10 минут...")
     
     sessions_count = get_user_sessions_count(user_id)
     sessions_ready = is_user_sessions_ready(user_id)
     
     await send_banner(
         msg,
-        f"<b>VICTIM SNOS v8.0</b>\n\n"
+        f"<b>VICTIM SNOS v9.0</b>\n\n"
         f"ID: <code>{user_id}</code>\n"
         f"Сессии: {sessions_count}/{SESSIONS_PER_USER} {'[ГОТОВ]' if sessions_ready else '[ЗАГРУЗКА]'}\n"
         f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}\n"
@@ -835,9 +822,9 @@ async def refresh_sessions(cb: types.CallbackQuery):
         await cb.answer("Нельзя во время сноса!", show_alert=True)
         return
     
-    await cb.answer("Обновление сессий...")
+    await cb.answer("Обновление 500 сессий...")
     asyncio.create_task(refresh_user_sessions(user_id))
-    await cb.message.answer("Обновление сессий запущено. Это займет 3-5 минут.")
+    await cb.message.answer("Обновление 500 сессий запущено. Это займет 5-10 минут.")
 
 @dp.callback_query(F.data == "status")
 async def status(cb: types.CallbackQuery):
@@ -875,13 +862,13 @@ async def snos_phone(msg: types.Message, state: FSMContext):
         phone = "+" + phone
     await state.update_data(phone=phone)
     await state.set_state(SnosState.waiting_count)
-    await msg.answer(f"Номер: {phone}\n\nВведите раунды (1-5):")
+    await msg.answer(f"Номер: {phone}\n\nВведите раунды (1-10):")
 
 @dp.message(StateFilter(SnosState.waiting_count))
 async def snos_count(msg: types.Message, state: FSMContext):
     try:
         count = int(msg.text.strip())
-        if count < 1 or count > 5:
+        if count < 1 or count > 10:
             return
     except:
         return
@@ -892,7 +879,7 @@ async def snos_count(msg: types.Message, state: FSMContext):
     await state.clear()
     
     active_attacks[user_id] = True
-    st = await msg.answer(f"<b>СНОС ЗАПУЩЕН</b>\n\nНомер: {phone}\nРаундов: {count}")
+    st = await msg.answer(f"<b>СНОС ЗАПУЩЕН</b>\n\nНомер: {phone}\nРаундов: {count}\nСессий: {SESSIONS_PER_USER}")
     
     async def prog(cur, tot, ok, err):
         try:
@@ -934,13 +921,13 @@ async def bomber_phone(msg: types.Message, state: FSMContext):
         phone = "+" + phone
     await state.update_data(phone=phone)
     await state.set_state(BomberState.waiting_count)
-    await msg.answer(f"Номер: {phone}\n\nВведите раунды (1-3):")
+    await msg.answer(f"Номер: {phone}\n\nВведите раунды (1-5):")
 
 @dp.message(StateFilter(BomberState.waiting_count))
 async def bomber_count(msg: types.Message, state: FSMContext):
     try:
         count = int(msg.text.strip())
-        if count < 1 or count > 3:
+        if count < 1 or count > 5:
             return
     except:
         return
@@ -1084,7 +1071,9 @@ async def init_mailtm():
         with open(MAILTM_ACCOUNTS_FILE, 'r') as f:
             mail_tm.accounts = json.load(f)
             mail_tm.ready = True
+            logger.info(f"Загружено {len(mail_tm.accounts)} почт")
     except:
+        logger.info("Создание почт...")
         await mail_tm.create_multiple_accounts(MAILTM_ACCOUNTS_COUNT)
         if mail_tm.accounts:
             with open(MAILTM_ACCOUNTS_FILE, 'w') as f:
@@ -1093,7 +1082,7 @@ async def init_mailtm():
 
 async def main():
     load_allowed_users()
-    logger.info(f"VICTIM SNOS v8.0 запуск... Сессий на пользователя: {SESSIONS_PER_USER}")
+    logger.info(f"VICTIM SNOS v9.0 запуск... Сессий на пользователя: {SESSIONS_PER_USER}")
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(init_mailtm())
     await dp.start_polling(bot)
