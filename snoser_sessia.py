@@ -853,6 +853,9 @@ async def start(msg: types.Message):
     if not is_user_allowed(user_id):
         await send_message_with_banner(msg, f"<b>ДОСТУП ЗАПРЕЩЕН</b>\n\nВаш ID: <code>{user_id}</code>")
         return
+        if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
+    asyncio.create_task(ensure_user_sessions(user_id))
+    
     sessions_count = get_user_sessions_count(user_id)
     sessions_ready = is_user_sessions_ready(user_id)
     
