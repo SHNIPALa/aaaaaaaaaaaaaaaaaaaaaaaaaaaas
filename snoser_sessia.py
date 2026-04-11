@@ -853,7 +853,7 @@ async def start(msg: types.Message):
         return
     
     if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
-        asyncio.create_task(ensure_user_sessions(user_id))
+            asyncio.create_task(ensure_user_sessions(user_id))
     
     sessions_count = get_user_sessions_count(user_id)
     sessions_ready = is_user_sessions_ready(user_id)
