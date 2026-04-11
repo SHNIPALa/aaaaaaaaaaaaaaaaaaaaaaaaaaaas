@@ -54,7 +54,6 @@ USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
 ]
 
-# Разные устройства для сессий
 DEVICES = [
     {"model": "iPhone 15 Pro", "system": "iOS 17.0"},
     {"model": "iPhone 14 Pro Max", "system": "iOS 16.5"},
@@ -231,14 +230,14 @@ class AccessMiddleware:
             if user_id == ADMIN_ID:
                 return await handler(event, data)
             else:
-                await event.reply("Только администратор!")
+                await send_message_with_banner(event, "Только администратор!")
                 return
 
         if user_id and not is_user_allowed(user_id):
             if isinstance(event, types.CallbackQuery):
                 await event.answer("У вас нет прав!", show_alert=True)
             elif isinstance(event, types.Message):
-                await event.reply("У вас нет прав!")
+                await send_message_with_banner(event, "У вас нет прав!")
             return
 
         return await handler(event, data)
@@ -831,18 +830,20 @@ def get_channel_complaint_menu():
     builder.adjust(1)
     return builder.as_markup()
 
-async def send_banner(msg: types.Message, caption: str, markup=None):
+async def send_message_with_banner(event: types.Message, text: str, markup=None):
+    """Отправка сообщения с баннером"""
     if os.path.exists(BANNER_PATH):
-        await msg.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=markup)
+        await event.answer_photo(FSInputFile(BANNER_PATH), caption=text, reply_markup=markup)
     else:
-        await msg.answer(caption, reply_markup=markup)
+        await event.answer(text, reply_markup=markup)
 
-async def edit_banner(cb: types.CallbackQuery, caption: str, markup=None):
-    await cb.message.delete()
+async def edit_message_with_banner(callback: types.CallbackQuery, text: str, markup=None):
+    """Редактирование сообщения с баннером"""
+    await callback.message.delete()
     if os.path.exists(BANNER_PATH):
-        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=markup)
+        await callback.message.answer_photo(FSInputFile(BANNER_PATH), caption=text, reply_markup=markup)
     else:
-        await cb.message.answer(caption, reply_markup=markup)
+        await callback.message.answer(text, reply_markup=markup)
 
 
 # ---------- ХЕНДЛЕРЫ ----------
@@ -850,17 +851,12 @@ async def edit_banner(cb: types.CallbackQuery, caption: str, markup=None):
 async def start(msg: types.Message):
     user_id = msg.from_user.id
     if not is_user_allowed(user_id):
-        await msg.answer(f"<b>ДОСТУП ЗАПРЕЩЕН</b>\n\nВаш ID: <code>{user_id}</code>")
+        await send_message_with_banner(msg, f"<b>ДОСТУП ЗАПРЕЩЕН</b>\n\nВаш ID: <code>{user_id}</code>")
         return
-    
-    if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
-        asyncio.create_task(ensure_user_sessions(user_id))
-        await msg.answer(f"Запущено создание {SESSIONS_PER_USER} сессий. Это займет 5-10 минут...")
-    
     sessions_count = get_user_sessions_count(user_id)
     sessions_ready = is_user_sessions_ready(user_id)
     
-    await send_banner(
+    await send_message_with_banner(
         msg,
         f"<b>VICTIM SNOS</b>\n\n"
         f"ID: <code>{user_id}</code>\n"
@@ -875,21 +871,21 @@ async def start(msg: types.Message):
 async def admin_cmd(msg: types.Message):
     if msg.from_user.id != ADMIN_ID:
         return
-    await send_banner(msg, f"<b>АДМИН-ПАНЕЛЬ</b>\n\nРазрешено: {len(ALLOWED_USERS)}", get_admin_menu())
+    await send_message_with_banner(msg, f"<b>АДМИН-ПАНЕЛЬ</b>\n\nРазрешено: {len(ALLOWED_USERS)}", get_admin_menu())
 
 @dp.callback_query(F.data == "snos_menu")
 async def snos_menu(cb: types.CallbackQuery):
-    await edit_banner(cb, "<b>СНОС</b>\n\nВыберите действие:", get_snos_menu())
+    await edit_message_with_banner(cb, "<b>СНОС</b>\n\nВыберите действие:", get_snos_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "bomber_menu")
 async def bomber_menu(cb: types.CallbackQuery):
-    await edit_banner(cb, "<b>БОМБЕР</b>\n\nВыберите действие:", get_bomber_menu())
+    await edit_message_with_banner(cb, "<b>БОМБЕР</b>\n\nВыберите действие:", get_bomber_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "complaint_menu")
 async def complaint_menu(cb: types.CallbackQuery):
-    await edit_banner(cb, "<b>ЖАЛОБЫ</b>\n\nВыберите тип жалобы:", get_complaint_menu())
+    await edit_message_with_banner(cb, "<b>ЖАЛОБЫ</b>\n\nВыберите тип жалобы:", get_complaint_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "admin_menu")
@@ -897,7 +893,7 @@ async def admin_menu_handler(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         await cb.answer("Нет прав!", show_alert=True)
         return
-    await edit_banner(cb, f"<b>АДМИН-ПАНЕЛЬ</b>\n\nРазрешено: {len(ALLOWED_USERS)}", get_admin_menu())
+    await edit_message_with_banner(cb, f"<b>АДМИН-ПАНЕЛЬ</b>\n\nРазрешено: {len(ALLOWED_USERS)}", get_admin_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "admin_logs")
@@ -906,7 +902,7 @@ async def admin_logs(cb: types.CallbackQuery):
         await cb.answer("Нет прав!", show_alert=True)
         return
     logs_text = get_last_logs(5)
-    await edit_banner(
+    await edit_message_with_banner(
         cb,
         f"<b>ПОСЛЕДНИЕ ДЕЙСТВИЯ</b>\n\n{logs_text}",
         InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="admin_menu")]])
@@ -926,9 +922,9 @@ async def admin_add_process(msg: types.Message, state: FSMContext):
         user_id = int(msg.text.strip())
         ALLOWED_USERS.add(user_id)
         save_allowed_users()
-        await msg.answer(f"Пользователь <code>{user_id}</code> получил доступ!")
+        await send_message_with_banner(msg, f"Пользователь <code>{user_id}</code> получил доступ!")
     except:
-        await msg.answer("Неверный ID!")
+        await send_message_with_banner(msg, "Неверный ID!")
     await state.clear()
 
 @dp.callback_query(F.data == "admin_remove")
@@ -940,7 +936,7 @@ async def admin_remove(cb: types.CallbackQuery):
         builder.button(text=f"Удалить {uid}", callback_data=f"remove_{uid}")
     builder.button(text="Назад", callback_data="admin_menu")
     builder.adjust(1)
-    await edit_banner(cb, "<b>УДАЛЕНИЕ ДОСТУПА</b>", builder.as_markup())
+    await edit_message_with_banner(cb, "<b>УДАЛЕНИЕ ДОСТУПА</b>", builder.as_markup())
 
 @dp.callback_query(F.data.startswith("remove_"))
 async def admin_remove_process(cb: types.CallbackQuery):
@@ -950,18 +946,18 @@ async def admin_remove_process(cb: types.CallbackQuery):
     if user_id in ALLOWED_USERS:
         ALLOWED_USERS.remove(user_id)
         save_allowed_users()
-    await edit_banner(cb, f"Доступ удален: <code>{user_id}</code>", get_admin_menu())
+    await edit_message_with_banner(cb, f"Доступ удален: <code>{user_id}</code>", get_admin_menu())
 
 @dp.callback_query(F.data == "admin_list")
 async def admin_list(cb: types.CallbackQuery):
     text = "<b>РАЗРЕШЕННЫЕ</b>\n\n" + "\n".join(f"<code>{uid}</code>" for uid in ALLOWED_USERS) if ALLOWED_USERS else "Пусто"
-    await edit_banner(cb, text, InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="admin_menu")]]))
+    await edit_message_with_banner(cb, text, InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="admin_menu")]]))
 
 @dp.callback_query(F.data == "main_menu")
 async def main_menu(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
     user_id = cb.from_user.id
-    await edit_banner(cb, f"<b>VICTIM SNOS</b>\n\nID: <code>{user_id}</code>", get_main_menu())
+    await edit_message_with_banner(cb, f"<b>VICTIM SNOS</b>\n\nID: <code>{user_id}</code>", get_main_menu())
 
 @dp.callback_query(F.data == "refresh_sessions")
 async def refresh_sessions(cb: types.CallbackQuery):
@@ -972,7 +968,7 @@ async def refresh_sessions(cb: types.CallbackQuery):
     
     await cb.answer(f"Обновление {SESSIONS_PER_USER} сессий...")
     asyncio.create_task(refresh_user_sessions(user_id))
-    await cb.message.answer(f"Обновление {SESSIONS_PER_USER} сессий запущено. Это займет 5-10 минут.")
+    await send_message_with_banner(cb.message, f"Обновление {SESSIONS_PER_USER} сессий запущено. Это займет 5-10 минут.")
 
 @dp.callback_query(F.data == "status")
 async def status(cb: types.CallbackQuery):
@@ -980,7 +976,7 @@ async def status(cb: types.CallbackQuery):
     sessions_count = get_user_sessions_count(user_id)
     sessions_ready = is_user_sessions_ready(user_id)
     
-    await edit_banner(
+    await edit_message_with_banner(
         cb,
         f"<b>СТАТУС</b>\n\n"
         f"ID: <code>{user_id}</code>\n"
@@ -1011,7 +1007,7 @@ async def snos_phone(msg: types.Message, state: FSMContext):
         phone = "+" + phone
     await state.update_data(phone=phone)
     await state.set_state(SnosState.waiting_count)
-    await msg.answer(f"Номер: {phone}\n\nВведите раунды (1-10):")
+    await send_message_with_banner(msg, f"Номер: {phone}\n\nВведите раунды (1-10):")
 
 @dp.message(StateFilter(SnosState.waiting_count))
 async def snos_count(msg: types.Message, state: FSMContext):
@@ -1028,11 +1024,11 @@ async def snos_count(msg: types.Message, state: FSMContext):
     await state.clear()
     
     active_attacks[user_id] = True
-    st = await msg.answer(f"<b>СНОС ЗАПУЩЕН</b>\n\nНомер: {phone}\nРаундов: {count}\nСайтов: {len(TELEGRAM_AUTH_SITES)}")
+    st = await send_message_with_banner(msg, f"<b>СНОС ЗАПУЩЕН</b>\n\nНомер: {phone}\nРаундов: {count}\nСайтов: {len(TELEGRAM_AUTH_SITES)}")
     
     async def prog(cur, tot, ok, err):
         try:
-            await st.edit_text(f"<b>СНОС</b>\n\nНомер: {phone}\nРаунд: {cur}/{tot}\nУспешно: {ok}\nОшибок: {err}")
+            await st.edit_caption(caption=f"<b>СНОС</b>\n\nНомер: {phone}\nРаунд: {cur}/{tot}\nУспешно: {ok}\nОшибок: {err}")
         except:
             pass
     
@@ -1051,7 +1047,7 @@ async def snos_count(msg: types.Message, state: FSMContext):
     if user_id in active_attacks:
         del active_attacks[user_id]
     
-    await send_banner(msg, "<b>Главное меню</b>", get_main_menu())
+    await send_message_with_banner(msg, "<b>Главное меню</b>", get_main_menu())
 
 @dp.callback_query(F.data == "bomber")
 async def bomber_start(cb: types.CallbackQuery, state: FSMContext):
@@ -1069,7 +1065,7 @@ async def bomber_phone(msg: types.Message, state: FSMContext):
         phone = "+" + phone
     await state.update_data(phone=phone)
     await state.set_state(BomberState.waiting_count)
-    await msg.answer(f"Номер: {phone}\n\nВведите раунды (1-5):")
+    await send_message_with_banner(msg, f"Номер: {phone}\n\nВведите раунды (1-5):")
 
 @dp.message(StateFilter(BomberState.waiting_count))
 async def bomber_count(msg: types.Message, state: FSMContext):
@@ -1086,11 +1082,11 @@ async def bomber_count(msg: types.Message, state: FSMContext):
     await state.clear()
     
     active_bombers[user_id] = True
-    st = await msg.answer(f"<b>БОМБЕР ЗАПУЩЕН</b>\n\nНомер: {phone}\nСайтов: {len(BOMBER_WEBSITES)}")
+    st = await send_message_with_banner(msg, f"<b>БОМБЕР ЗАПУЩЕН</b>\n\nНомер: {phone}\nСайтов: {len(BOMBER_WEBSITES)}")
     
     async def prog(cur, tot, ok, err):
         try:
-            await st.edit_text(f"<b>БОМБЕР</b>\n\nНомер: {phone}\nРаунд: {cur}/{tot}\nУспешно: {ok}\nОшибок: {err}")
+            await st.edit_caption(caption=f"<b>БОМБЕР</b>\n\nНомер: {phone}\nРаунд: {cur}/{tot}\nУспешно: {ok}\nОшибок: {err}")
         except:
             pass
     
@@ -1108,11 +1104,11 @@ async def bomber_count(msg: types.Message, state: FSMContext):
     if user_id in active_bombers:
         del active_bombers[user_id]
     
-    await send_banner(msg, "<b>Главное меню</b>", get_main_menu())
+    await send_message_with_banner(msg, "<b>Главное меню</b>", get_main_menu())
 
 @dp.callback_query(F.data == "comp_acc")
 async def comp_acc_menu(cb: types.CallbackQuery):
-    await edit_banner(cb, "<b>ЖАЛОБА НА АККАУНТ</b>\n\nВыберите тип:", get_account_complaint_menu())
+    await edit_message_with_banner(cb, "<b>ЖАЛОБА НА АККАУНТ</b>\n\nВыберите тип:", get_account_complaint_menu())
 
 @dp.callback_query(F.data.startswith("acc_"))
 async def comp_acc_type(cb: types.CallbackQuery, state: FSMContext):
@@ -1130,13 +1126,13 @@ async def comp_acc_type(cb: types.CallbackQuery, state: FSMContext):
 async def comp_acc_reason(msg: types.Message, state: FSMContext):
     await state.update_data(reason=msg.text.strip())
     await state.set_state(ComplaintAccountState.waiting_username)
-    await msg.answer("Введите юзернейм (без @):")
+    await send_message_with_banner(msg, "Введите юзернейм (без @):")
 
 @dp.message(StateFilter(ComplaintAccountState.waiting_username))
 async def comp_acc_username(msg: types.Message, state: FSMContext):
     await state.update_data(username=msg.text.strip().replace("@", ""))
     await state.set_state(ComplaintAccountState.waiting_id)
-    await msg.answer("Введите Telegram ID:")
+    await send_message_with_banner(msg, "Введите Telegram ID:")
 
 @dp.message(StateFilter(ComplaintAccountState.waiting_id))
 async def comp_acc_id(msg: types.Message, state: FSMContext):
@@ -1153,16 +1149,15 @@ async def comp_acc_id(msg: types.Message, state: FSMContext):
     
     add_log(user_id, "Жалоба на аккаунт", f"@{username}")
     
-    st = await msg.answer("<b>Отправка жалоб...</b>")
+    st = await send_message_with_banner(msg, "<b>Отправка жалоб...</b>")
     sent = await send_mass_complaint(mail_tm, f"Жалоба на @{username}", body)
     await st.delete()
     
-    await msg.answer(f"<b>ГОТОВО!</b>\n\nЮзернейм: @{username}\nID: {telegram_id}\nОтправлено: {sent}")
-    await send_banner(msg, "<b>Главное меню</b>", get_main_menu())
+    await send_message_with_banner(msg, f"<b>ГОТОВО!</b>\n\nЮзернейм: @{username}\nID: {telegram_id}\nОтправлено: {sent}", get_main_menu())
 
 @dp.callback_query(F.data == "comp_chan")
 async def comp_chan_menu(cb: types.CallbackQuery):
-    await edit_banner(cb, "<b>ЖАЛОБА НА КАНАЛ</b>\n\nВыберите тип:", get_channel_complaint_menu())
+    await edit_message_with_banner(cb, "<b>ЖАЛОБА НА КАНАЛ</b>\n\nВыберите тип:", get_channel_complaint_menu())
 
 @dp.callback_query(F.data.startswith("chan_"))
 async def comp_chan_type(cb: types.CallbackQuery, state: FSMContext):
@@ -1175,7 +1170,7 @@ async def comp_chan_type(cb: types.CallbackQuery, state: FSMContext):
 async def comp_chan_link(msg: types.Message, state: FSMContext):
     await state.update_data(channel=msg.text.strip())
     await state.set_state(ComplaintChannelState.waiting_violation)
-    await msg.answer("Введите ссылку на нарушение:")
+    await send_message_with_banner(msg, "Введите ссылку на нарушение:")
 
 @dp.message(StateFilter(ComplaintChannelState.waiting_violation))
 async def comp_chan_violation(msg: types.Message, state: FSMContext):
@@ -1191,12 +1186,11 @@ async def comp_chan_violation(msg: types.Message, state: FSMContext):
     
     add_log(user_id, "Жалоба на канал", channel)
     
-    st = await msg.answer("<b>Отправка жалоб...</b>")
+    st = await send_message_with_banner(msg, "<b>Отправка жалоб...</b>")
     sent = await send_mass_complaint(mail_tm, "Жалоба на канал", body)
     await st.delete()
     
-    await msg.answer(f"<b>ГОТОВО!</b>\n\nКанал: {channel}\nОтправлено: {sent}")
-    await send_banner(msg, "<b>Главное меню</b>", get_main_menu())
+    await send_message_with_banner(msg, f"<b>ГОТОВО!</b>\n\nКанал: {channel}\nОтправлено: {sent}", get_main_menu())
 
 @dp.callback_query(F.data == "comp_msg")
 async def comp_msg_start(cb: types.CallbackQuery, state: FSMContext):
@@ -1216,12 +1210,11 @@ async def comp_msg_link(msg: types.Message, state: FSMContext):
     
     add_log(user_id, "Жалоба на сообщение", message_link)
     
-    st = await msg.answer("<b>Отправка жалоб...</b>")
+    st = await send_message_with_banner(msg, "<b>Отправка жалоб...</b>")
     sent = await send_mass_complaint(mail_tm, "Жалоба на сообщение", body)
     await st.delete()
     
-    await msg.answer(f"<b>ГОТОВО!</b>\n\nСообщение: {message_link}\nОтправлено: {sent}")
-    await send_banner(msg, "<b>Главное меню</b>", get_main_menu())
+    await send_message_with_banner(msg, f"<b>ГОТОВО!</b>\n\nСообщение: {message_link}\nОтправлено: {sent}", get_main_menu())
 
 @dp.callback_query(F.data == "comp_simple")
 async def comp_simple_start(cb: types.CallbackQuery, state: FSMContext):
@@ -1241,12 +1234,11 @@ async def comp_simple_username(msg: types.Message, state: FSMContext):
     
     add_log(user_id, "Простая жалоба", f"@{username}")
     
-    st = await msg.answer("<b>Отправка жалоб...</b>")
+    st = await send_message_with_banner(msg, "<b>Отправка жалоб...</b>")
     sent = await send_mass_complaint(mail_tm, f"Жалоба на @{username}", body)
     await st.delete()
     
-    await msg.answer(f"<b>ГОТОВО!</b>\n\nЮзернейм: @{username}\nОтправлено: {sent}")
-    await send_banner(msg, "<b>Главное меню</b>", get_main_menu())
+    await send_message_with_banner(msg, f"<b>ГОТОВО!</b>\n\nЮзернейм: @{username}\nОтправлено: {sent}", get_main_menu())
 
 @dp.callback_query(F.data == "stop")
 async def stop(cb: types.CallbackQuery):
@@ -1255,7 +1247,7 @@ async def stop(cb: types.CallbackQuery):
         del active_attacks[user_id]
     if user_id in active_bombers:
         del active_bombers[user_id]
-    await edit_banner(cb, "<b>Остановлено</b>", get_main_menu())
+    await edit_message_with_banner(cb, "<b>Остановлено</b>", get_main_menu())
 
 
 # ---------- ЗАПУСК ----------
