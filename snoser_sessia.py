@@ -377,7 +377,7 @@ class AccessMiddleware:
 dp.update.middleware(AccessMiddleware())
 
 
-# ---------- MAIL.TM ----------
+# ---------- ИСПРАВЛЕННЫЙ MAIL.TM ----------
 class MailTM:
     def __init__(self):
         self.base_url = "https://api.mail.tm"
@@ -440,8 +440,8 @@ class MailTM:
                                 "password": account_data["password"],
                                 "token": token_data["token"]
                             }
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"MailTM create error: {e}")
         return None
     
     async def create_multiple_accounts(self, count: int) -> list:
@@ -451,6 +451,8 @@ class MailTM:
             if account:
                 accounts.append(account)
                 logger.info(f"Mail.tm {len(accounts)}/{count}: {account['email']}")
+            else:
+                logger.warning(f"Не удалось создать аккаунт {i+1}")
             await asyncio.sleep(2)
         self.accounts = accounts
         self.ready = True
@@ -459,24 +461,77 @@ class MailTM:
     async def send_email(self, account: dict, to_email: str, subject: str, body: str) -> bool:
         await self.init_session()
         try:
-            email_data = {
-                "from": account["email"],
-                "to": [to_email],
+            # Правильный формат для mail.tm API
+            message_data = {
+                "from": {
+                    "address": account["email"],
+                    "name": "Telegram User"
+                },
+                "to": [{
+                    "address": to_email
+                }],
                 "subject": subject,
                 "text": body
             }
+            
             headers = {
                 "Authorization": f"Bearer {account['token']}",
                 "Content-Type": "application/json"
             }
+            
             async with self.session.post(
                 f"{self.base_url}/messages",
-                json=email_data,
+                json=message_data,
                 headers=headers
             ) as resp:
-                return resp.status in [200, 201, 202]
-        except:
+                if resp.status in [200, 201, 202]:
+                    logger.info(f"Email sent: {account['email']} -> {to_email}")
+                    return True
+                else:
+                    error_text = await resp.text()
+                    logger.error(f"MailTM send error {resp.status}: {error_text}")
+                    return False
+        except Exception as e:
+            logger.error(f"MailTM send exception: {e}")
             return False
+
+
+# ---------- ИСПРАВЛЕННАЯ ОТПРАВКА ЖАЛОБ ----------
+async def send_mass_complaint(mail_tm: MailTM, subject: str, body: str) -> int:
+    if not mail_tm.ready or not mail_tm.accounts:
+        logger.error("MailTM не готов или нет аккаунтов")
+        return 0
+    
+    sent = 0
+    sem = asyncio.Semaphore(5)  # Уменьшаем количество одновременных отправок
+    
+    async def send_one(acc, rec):
+        try:
+            async with sem:
+                result = await mail_tm.send_email(acc, rec, subject, body)
+                if result:
+                    logger.info(f"Отправлено: {acc['email']} -> {rec}")
+                else:
+                    logger.warning(f"Не отправлено: {acc['email']} -> {rec}")
+                await asyncio.sleep(2)  # Увеличиваем задержку
+                return result
+        except Exception as e:
+            logger.error(f"Ошибка отправки: {e}")
+            return False
+    
+    tasks = []
+    # Используем меньше аккаунтов за раз
+    for acc in mail_tm.accounts[:5]:
+        for rec in RECEIVERS[:2]:
+            tasks.append(send_one(acc, rec))
+    
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    sent = sum(1 for r in results if r is True)
+    logger.info(f"Всего отправлено писем: {sent}")
+    return sent
+
+
+
 
 
 # ---------- СЕССИИ ----------
@@ -1577,14 +1632,25 @@ async def stop(cb: types.CallbackQuery):
 # ---------- ЗАПУСК ----------
 mail_tm = MailTM()
 
+# ---------- ИСПРАВЛЕННАЯ ИНИЦИАЛИЗАЦИЯ ----------
 async def init_mailtm():
     try:
         with open(MAILTM_ACCOUNTS_FILE, 'r') as f:
             mail_tm.accounts = json.load(f)
             mail_tm.ready = True
-            logger.info(f"Загружено {len(mail_tm.accounts)} почт")
-    except:
-        logger.info("Создание почт...")
+            logger.info(f"Загружено {len(mail_tm.accounts)} почт из файла")
+            
+            # Проверяем валидность токенов
+            valid_accounts = []
+            for acc in mail_tm.accounts:
+                if "token" in acc and "email" in acc:
+                    valid_accounts.append(acc)
+            mail_tm.accounts = valid_accounts
+            logger.info(f"Валидных аккаунтов: {len(mail_tm.accounts)}")
+            
+    except Exception as e:
+        logger.error(f"Ошибка загрузки почт: {e}")
+        logger.info("Создание новых почт...")
         await mail_tm.create_multiple_accounts(MAILTM_ACCOUNTS_COUNT)
         if mail_tm.accounts:
             with open(MAILTM_ACCOUNTS_FILE, 'w') as f:
