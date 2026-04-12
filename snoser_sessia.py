@@ -9,9 +9,6 @@ import time
 import shutil
 import re
 import hashlib
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 
@@ -47,8 +44,8 @@ MAX_ROUNDS = 10
 BOMBER_DELAY = 2
 SITE_DELAY = 10
 
-MAILTM_ACCOUNTS_PER_USER = 10
-MAILTM_ACCOUNTS_DIR = "mailtm_accounts"
+MAIL_ACCOUNTS_PER_USER = 20
+MAIL_ACCOUNTS_DIR = "mail_accounts"
 BANNER_PATH = "banner.png"
 
 USER_AGENTS = [
@@ -359,21 +356,19 @@ class AccessMiddleware:
 dp.update.middleware(AccessMiddleware())
 
 
-# ---------- MAIL.TM СЕРВИС ДЛЯ ПОЛЬЗОВАТЕЛЯ ----------
-class UserMailTM:
+# ---------- GUERRILLA MAIL СЕРВИС ----------
+class UserMailService:
     def __init__(self, user_id: int):
         self.user_id = user_id
-        self.base_url = "https://api.mail.tm"
+        self.base_url = "https://api.guerrillamail.com/ajax.php"
         self.accounts = []
         self.session = None
         self.ready = False
-        self.smtp_host = "mail.tm"
-        self.smtp_port = 587
-        self.accounts_file = f"{MAILTM_ACCOUNTS_DIR}/user_{user_id}.json"
+        self.accounts_file = f"{MAIL_ACCOUNTS_DIR}/user_{user_id}.json"
         
     async def init_session(self):
         if not self.session:
-            connector = aiohttp.TCPConnector(limit=10, force_close=True, ssl=False)
+            connector = aiohttp.TCPConnector(limit=20, force_close=True, ssl=False)
             timeout = aiohttp.ClientTimeout(total=30)
             self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
     
@@ -382,37 +377,23 @@ class UserMailTM:
             await self.session.close()
             self.session = None
     
-    async def get_domain(self) -> str:
-        await self.init_session()
-        try:
-            async with self.session.get(f"{self.base_url}/domains") as resp:
-                if resp.status == 200:
-                    domains = await resp.json()
-                    return domains['hydra:member'][0]['domain']
-        except:
-            pass
-        return "inbox.testmail.app"
-    
     async def create_account(self) -> dict:
         await self.init_session()
         try:
-            random_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-            domain = await self.get_domain()
-            
-            account_data = {
-                "address": f"user{self.user_id}_{random_str}@{domain}",
-                "password": ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+            params = {
+                "f": "get_email_address",
+                "ip": f"user_{self.user_id}_{random.randint(1000, 9999)}",
+                "agent": f"Mozilla_{random.randint(100, 999)}"
             }
-            
-            async with self.session.post(f"{self.base_url}/accounts", json=account_data, headers={"Content-Type": "application/json"}) as resp:
-                if resp.status in [200, 201]:
-                    login_data = {"address": account_data["address"], "password": account_data["password"]}
-                    async with self.session.post(f"{self.base_url}/token", json=login_data, headers={"Content-Type": "application/json"}) as login_resp:
-                        if login_resp.status == 200:
-                            token_data = await login_resp.json()
-                            return {"email": account_data["address"], "password": account_data["password"], "token": token_data["token"]}
+            async with self.session.get(self.base_url, params=params, headers={"User-Agent": random.choice(USER_AGENTS)}) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    email = data.get("email_addr")
+                    sid_token = data.get("sid_token")
+                    if email and sid_token:
+                        return {"email": email, "sid_token": sid_token, "created": time.time()}
         except Exception as e:
-            logger.error(f"Create account error for user {self.user_id}: {e}")
+            logger.error(f"Create Guerrilla Mail error for user {self.user_id}: {e}")
         return None
     
     async def create_multiple_accounts(self, count: int) -> list:
@@ -421,15 +402,15 @@ class UserMailTM:
             account = await self.create_account()
             if account:
                 accounts.append(account)
-                logger.info(f"User {self.user_id} - Mail.tm {len(accounts)}/{count}: {account['email']}")
-            await asyncio.sleep(2)
+                logger.info(f"User {self.user_id} - Mail {len(accounts)}/{count}: {account['email']}")
+            await asyncio.sleep(3)  # Задержка чтобы не заблокировали
         self.accounts = accounts
         self.ready = True
         self.save_accounts()
         return accounts
     
     def save_accounts(self):
-        os.makedirs(MAILTM_ACCOUNTS_DIR, exist_ok=True)
+        os.makedirs(MAIL_ACCOUNTS_DIR, exist_ok=True)
         with open(self.accounts_file, 'w') as f:
             json.dump(self.accounts, f)
     
@@ -442,96 +423,39 @@ class UserMailTM:
         except:
             return False
     
-    async def refresh_token(self, account: dict) -> bool:
-        await self.init_session()
-        try:
-            login_data = {"address": account["email"], "password": account["password"]}
-            async with self.session.post(f"{self.base_url}/token", json=login_data, headers={"Content-Type": "application/json"}) as resp:
-                if resp.status == 200:
-                    token_data = await resp.json()
-                    account["token"] = token_data["token"]
-                    return True
-        except:
-            pass
-        return False
-    
-    async def send_email_api(self, account: dict, to_email: str, subject: str, body: str) -> bool:
-        await self.init_session()
-        
-        try:
-            message_data = {
-                "from": account["email"],
-                "to": [to_email],
-                "subject": subject,
-                "text": body
-            }
-            
-            headers = {
-                "Authorization": f"Bearer {account['token']}",
-                "Content-Type": "application/json"
-            }
-            
-            async with self.session.post(
-                f"{self.base_url}/messages", 
-                json=message_data, 
-                headers=headers
-            ) as resp:
-                if resp.status in [200, 201, 202]:
-                    logger.info(f"API Email sent from {account['email']} to {to_email}")
-                    return True
-                else:
-                    logger.error(f"API Email failed: {resp.status}")
-                    return False
-        except Exception as e:
-            logger.error(f"API send error: {e}")
-            return False
-    
-    async def send_email_smtp(self, account: dict, to_email: str, subject: str, body: str) -> bool:
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = account['email']
-            msg['To'] = to_email
-            msg['Subject'] = subject
-            msg.attach(MIMEText(body, 'plain', 'utf-8'))
-            
-            def send():
-                try:
-                    with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
-                        server.starttls()
-                        server.login(account['email'], account['password'])
-                        server.send_message(msg)
-                    return True
-                except Exception as e:
-                    logger.error(f"SMTP error: {e}")
-                    return False
-            
-            result = await asyncio.get_event_loop().run_in_executor(None, send)
-            if result:
-                logger.info(f"SMTP Email sent from {account['email']} to {to_email}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"SMTP send error: {e}")
-            return False
-    
     async def send_email(self, account: dict, to_email: str, subject: str, body: str) -> bool:
-        # Сначала пробуем API
-        result = await self.send_email_api(account, to_email, subject, body)
-        if result:
-            return True
-        
-        # Если API не сработал, пробуем SMTP
-        await asyncio.sleep(1)
-        result = await self.send_email_smtp(account, to_email, subject, body)
-        return result
+        await self.init_session()
+        try:
+            params = {
+                "f": "send_email",
+                "sid_token": account["sid_token"],
+                "to": to_email,
+                "subject": subject,
+                "body": body
+            }
+            headers = {
+                "User-Agent": random.choice(USER_AGENTS),
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            async with self.session.post(self.base_url, data=params, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("status") == "success":
+                        logger.info(f"Email sent from {account['email']} to {to_email}")
+                        return True
+                    else:
+                        logger.error(f"Send failed: {data}")
+        except Exception as e:
+            logger.error(f"Send email error: {e}")
+        return False
 
 
-async def get_user_mail_service(user_id: int) -> UserMailTM:
+async def get_user_mail_service(user_id: int) -> UserMailService:
     if user_id not in user_mail_services:
-        user_mail_services[user_id] = UserMailTM(user_id)
+        user_mail_services[user_id] = UserMailService(user_id)
         if not user_mail_services[user_id].load_accounts():
             logger.info(f"Creating mail accounts for user {user_id}")
-            await user_mail_services[user_id].create_multiple_accounts(MAILTM_ACCOUNTS_PER_USER)
+            await user_mail_services[user_id].create_multiple_accounts(MAIL_ACCOUNTS_PER_USER)
     return user_mail_services[user_id]
 
 
@@ -835,11 +759,11 @@ async def send_mass_complaint(user_id: int, subject: str, body: str) -> int:
     mail_service = await get_user_mail_service(user_id)
     
     if not mail_service.ready or not mail_service.accounts:
-        logger.error(f"MailTM not ready for user {user_id}")
+        logger.error(f"Mail service not ready for user {user_id}")
         return 0
     
     sent = 0
-    accounts_to_use = mail_service.accounts[:MAILTM_ACCOUNTS_PER_USER]
+    accounts_to_use = mail_service.accounts[:MAIL_ACCOUNTS_PER_USER]
     
     semaphore = asyncio.Semaphore(3)
     
@@ -1082,20 +1006,20 @@ async def mail_menu(cb: types.CallbackQuery):
     user_id = cb.from_user.id
     mail_service = user_mail_services.get(user_id)
     accounts_count = len(mail_service.accounts) if mail_service and mail_service.ready else 0
-    await edit_message_with_banner(cb, f"<b>СНОС ПОЧТА</b>\n\nАккаунтов: {accounts_count}/{MAILTM_ACCOUNTS_PER_USER}", get_mail_menu())
+    await edit_message_with_banner(cb, f"<b>СНОС ПОЧТА</b>\n\nАккаунтов: {accounts_count}/{MAIL_ACCOUNTS_PER_USER}", get_mail_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "mail_create")
 async def mail_create(cb: types.CallbackQuery):
     user_id = cb.from_user.id
-    await cb.answer("Создание почтовых аккаунтов...")
+    await cb.answer("Создание 20 почтовых аккаунтов...")
     
     if user_id in user_mail_services:
         await user_mail_services[user_id].close()
         del user_mail_services[user_id]
     
     mail_service = await get_user_mail_service(user_id)
-    await mail_service.create_multiple_accounts(MAILTM_ACCOUNTS_PER_USER)
+    await mail_service.create_multiple_accounts(MAIL_ACCOUNTS_PER_USER)
     
     await edit_message_with_banner(cb, f"<b>СОЗДАНО {len(mail_service.accounts)} ПОЧТ</b>", get_mail_menu())
 
@@ -1195,7 +1119,7 @@ async def status(cb: types.CallbackQuery):
     mail_count = len(mail_service.accounts) if mail_service and mail_service.ready else 0
     await edit_message_with_banner(
         cb, 
-        f"<b>СТАТУС</b>\n\nID: <code>{user_id}</code>\nСессии: {get_user_sessions_count(user_id)}/{SESSIONS_PER_USER}\nПочты: {mail_count}/{MAILTM_ACCOUNTS_PER_USER}",
+        f"<b>СТАТУС</b>\n\nID: <code>{user_id}</code>\nСессии: {get_user_sessions_count(user_id)}/{SESSIONS_PER_USER}\nПочты: {mail_count}/{MAIL_ACCOUNTS_PER_USER}",
         InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="main_menu")]])
     )
 
@@ -1650,7 +1574,7 @@ async def handle_photo(msg: types.Message):
 # ---------- ЗАПУСК ----------
 async def main():
     load_allowed_users()
-    os.makedirs(MAILTM_ACCOUNTS_DIR, exist_ok=True)
+    os.makedirs(MAIL_ACCOUNTS_DIR, exist_ok=True)
     logger.info("VICTIM SNOS запуск")
     
     await bot.delete_webhook(drop_pending_updates=True)
