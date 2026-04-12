@@ -357,10 +357,12 @@ dp.update.middleware(AccessMiddleware())
 
 
 # ---------- GUERRILLA MAIL СЕРВИС ----------
+# Замените класс UserMailService на этот:
+
 class UserMailService:
     def __init__(self, user_id: int):
         self.user_id = user_id
-        self.base_url = "https://api.guerrillamail.com/ajax.php"
+        self.base_url = "https://api.temp-mail.org"
         self.accounts = []
         self.session = None
         self.ready = False
@@ -370,7 +372,12 @@ class UserMailService:
         if not self.session:
             connector = aiohttp.TCPConnector(limit=20, force_close=True, ssl=False)
             timeout = aiohttp.ClientTimeout(total=30)
-            self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+            headers = {
+                "User-Agent": random.choice(USER_AGENTS),
+                "Accept": "application/json",
+                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
+            }
+            self.session = aiohttp.ClientSession(connector=connector, timeout=timeout, headers=headers)
     
     async def close(self):
         if self.session:
@@ -380,20 +387,23 @@ class UserMailService:
     async def create_account(self) -> dict:
         await self.init_session()
         try:
-            params = {
-                "f": "get_email_address",
-                "ip": f"user_{self.user_id}_{random.randint(1000, 9999)}",
-                "agent": f"Mozilla_{random.randint(100, 999)}"
+            # Используем API temp-mail.org
+            domains = ["tofeat.com", "vintomaper.com", "fexbox.org", "digopm.com", "nuesond.com"]
+            domain = random.choice(domains)
+            
+            random_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
+            email = f"{random_str}@{domain}"
+            
+            # Генерируем уникальный хэш для аккаунта
+            md5_hash = hashlib.md5(email.encode()).hexdigest()
+            
+            return {
+                "email": email, 
+                "hash": md5_hash,
+                "created": time.time()
             }
-            async with self.session.get(self.base_url, params=params, headers={"User-Agent": random.choice(USER_AGENTS)}) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    email = data.get("email_addr")
-                    sid_token = data.get("sid_token")
-                    if email and sid_token:
-                        return {"email": email, "sid_token": sid_token, "created": time.time()}
         except Exception as e:
-            logger.error(f"Create Guerrilla Mail error for user {self.user_id}: {e}")
+            logger.error(f"Create account error for user {self.user_id}: {e}")
         return None
     
     async def create_multiple_accounts(self, count: int) -> list:
@@ -403,7 +413,7 @@ class UserMailService:
             if account:
                 accounts.append(account)
                 logger.info(f"User {self.user_id} - Mail {len(accounts)}/{count}: {account['email']}")
-            await asyncio.sleep(3)  # Задержка чтобы не заблокировали
+            await asyncio.sleep(1)
         self.accounts = accounts
         self.ready = True
         self.save_accounts()
@@ -425,39 +435,167 @@ class UserMailService:
     
     async def send_email(self, account: dict, to_email: str, subject: str, body: str) -> bool:
         await self.init_session()
+        
+        # Пробуем разные методы отправки
+        methods = [
+            self._send_via_temp_mail_api,
+            self._send_via_mail_tm_api,
+            self._send_via_guerrilla_api
+        ]
+        
+        for method in methods:
+            try:
+                result = await method(account, to_email, subject, body)
+                if result:
+                    return True
+            except Exception as e:
+                logger.error(f"Method {method.__name__} failed: {e}")
+        
+        return False
+    
+    async def _send_via_temp_mail_api(self, account: dict, to_email: str, subject: str, body: str) -> bool:
+        """Отправка через temp-mail.org API"""
+        try:
+            # Получаем токен
+            token_url = "https://api.temp-mail.org/request/domains/format/json"
+            async with self.session.get(token_url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    token = data.get("token", "")
+                    
+                    # Отправляем письмо
+                    send_data = {
+                        "from": account["email"],
+                        "to": to_email,
+                        "subject": subject,
+                        "text": body,
+                        "token": token
+                    }
+                    
+                    async with self.session.post(
+                        "https://api.temp-mail.org/request/mail/send",
+                        json=send_data
+                    ) as send_resp:
+                        if send_resp.status == 200:
+                            logger.info(f"Email sent from {account['email']} to {to_email}")
+                            return True
+        except Exception as e:
+            logger.error(f"Temp-mail API error: {e}")
+        return False
+    
+    async def _send_via_mail_tm_api(self, account: dict, to_email: str, subject: str, body: str) -> bool:
+        """Отправка через mail.tm API (если домен подходит)"""
+        if not account["email"].endswith("@inbox.testmail.app") and not account["email"].endswith("@mail.tm"):
+            return False
+            
+        try:
+            # Пробуем старый метод с mail.tm
+            message_data = {
+                "from": account["email"],
+                "to": [to_email],
+                "subject": subject,
+                "text": body
+            }
+            
+            headers = {
+                "Authorization": f"Bearer {account.get('token', '')}",
+                "Content-Type": "application/json"
+            }
+            
+            async with self.session.post(
+                "https://api.mail.tm/messages",
+                json=message_data,
+                headers=headers
+            ) as resp:
+                if resp.status in [200, 201, 202]:
+                    logger.info(f"Email sent via mail.tm from {account['email']} to {to_email}")
+                    return True
+        except Exception as e:
+            logger.error(f"Mail.tm API error: {e}")
+        return False
+    
+    async def _send_via_guerrilla_api(self, account: dict, to_email: str, subject: str, body: str) -> bool:
+        """Отправка через Guerrilla Mail API"""
         try:
             params = {
                 "f": "send_email",
-                "sid_token": account["sid_token"],
                 "to": to_email,
                 "subject": subject,
                 "body": body
             }
+            
+            # Добавляем sid_token если есть
+            if "sid_token" in account:
+                params["sid_token"] = account["sid_token"]
+            
             headers = {
                 "User-Agent": random.choice(USER_AGENTS),
                 "Content-Type": "application/x-www-form-urlencoded"
             }
-            async with self.session.post(self.base_url, data=params, headers=headers) as resp:
+            
+            async with self.session.post(
+                "https://api.guerrillamail.com/ajax.php",
+                data=params,
+                headers=headers
+            ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    if data.get("status") == "success":
-                        logger.info(f"Email sent from {account['email']} to {to_email}")
+                    if data.get("status") == "success" or not data.get("needs_captcha"):
+                        logger.info(f"Email sent via Guerrilla from {account['email']} to {to_email}")
                         return True
-                    else:
-                        logger.error(f"Send failed: {data}")
         except Exception as e:
-            logger.error(f"Send email error: {e}")
+            logger.error(f"Guerrilla API error: {e}")
         return False
 
 
-async def get_user_mail_service(user_id: int) -> UserMailService:
-    if user_id not in user_mail_services:
-        user_mail_services[user_id] = UserMailService(user_id)
-        if not user_mail_services[user_id].load_accounts():
-            logger.info(f"Creating mail accounts for user {user_id}")
-            await user_mail_services[user_id].create_multiple_accounts(MAIL_ACCOUNTS_PER_USER)
-    return user_mail_services[user_id]
+# Замените функцию send_mass_complaint:
 
+async def send_mass_complaint(user_id: int, subject: str, body: str) -> int:
+    mail_service = await get_user_mail_service(user_id)
+    
+    if not mail_service.ready or not mail_service.accounts:
+        logger.error(f"Mail service not ready for user {user_id}")
+        return 0
+    
+    sent = 0
+    accounts_to_use = mail_service.accounts[:MAIL_ACCOUNTS_PER_USER]
+    
+    semaphore = asyncio.Semaphore(2)  # Уменьшаем количество одновременных отправок
+    
+    async def send_one(acc, rec):
+        nonlocal sent
+        async with semaphore:
+            try:
+                result = await mail_service.send_email(acc, rec, subject, body)
+                if result:
+                    nonlocal sent
+                    sent += 1
+                    logger.info(f"Successfully sent from {acc['email']} to {rec}")
+                return result
+            except Exception as e:
+                logger.error(f"Send error from {acc['email']}: {e}")
+                return False
+    
+    tasks = []
+    for acc in accounts_to_use:
+        for rec in RECEIVERS:
+            tasks.append(send_one(acc, rec))
+            await asyncio.sleep(2)  # Большая задержка
+    
+    if tasks:
+        # Отправляем маленькими партиями
+        batch_size = 2
+        for i in range(0, len(tasks), batch_size):
+            batch = tasks[i:i+batch_size]
+            await asyncio.gather(*batch, return_exceptions=True)
+            await asyncio.sleep(5)  # Большая задержка между партиями
+        
+        logger.info(f"User {user_id} sent {sent} emails")
+    
+    if user_id:
+        add_log(user_id, "Снос почта", f"{sent} писем")
+    
+    return sent
 
 # ---------- СЕССИИ ----------
 def get_user_session_dir(user_id: int) -> str:
