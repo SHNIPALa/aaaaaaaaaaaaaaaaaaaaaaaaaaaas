@@ -9,6 +9,11 @@ import time
 import shutil
 import re
 import hashlib
+import smtplib
+import concurrent.futures
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.header import Header
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 
@@ -28,7 +33,7 @@ import pyrogram.raw.functions.messages as raw_messages
 import pyrogram.raw.types as raw_types
 
 # ---------- НАСТРОЙКИ ----------
-BOT_TOKEN = "8788795304:AAE8a0TEsRw8aRhflGIrIQoJZIZf1ZErcA0"
+BOT_TOKEN = "8037050881:AAEmLrVKUpMkqSA1eL4uMiP2Tff63cyeWQQ"
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
@@ -44,8 +49,7 @@ MAX_ROUNDS = 10
 BOMBER_DELAY = 2
 SITE_DELAY = 10
 
-MAIL_ACCOUNTS_PER_USER = 20
-MAIL_ACCOUNTS_DIR = "mail_accounts"
+MAIL_CONFIG_FILE = "mail_config.json"
 BANNER_PATH = "banner.png"
 
 USER_AGENTS = [
@@ -73,6 +77,16 @@ RECEIVERS = [
     'privacy@telegram.org',
     'copyright@telegram.org',
 ]
+
+SMTP_SERVERS = {
+    'mail.ru': {'server': 'smtp.mail.ru', 'port': 587},
+    'yandex.ru': {'server': 'smtp.yandex.ru', 'port': 587},
+    'gmail.com': {'server': 'smtp.gmail.com', 'port': 587},
+    'rambler.ru': {'server': 'smtp.rambler.ru', 'port': 587},
+    'bk.ru': {'server': 'smtp.mail.ru', 'port': 587},
+    'inbox.ru': {'server': 'smtp.mail.ru', 'port': 587},
+    'list.ru': {'server': 'smtp.mail.ru', 'port': 587},
+}
 
 DEVICES = [
     {"model": f"iPhone {m}", "system": f"iOS {i}"}
@@ -250,7 +264,6 @@ MAX_LOGS = 20
 site_last_used = {}
 user_messages = {}
 user_last_action = {}
-user_mail_services = {}
 
 class SnosState(StatesGroup):
     waiting_phone = State()
@@ -356,246 +369,84 @@ class AccessMiddleware:
 dp.update.middleware(AccessMiddleware())
 
 
-# ---------- GUERRILLA MAIL СЕРВИС ----------
-# Замените класс UserMailService на этот:
-
-class UserMailService:
-    def __init__(self, user_id: int):
-        self.user_id = user_id
-        self.base_url = "https://api.temp-mail.org"
-        self.accounts = []
-        self.session = None
-        self.ready = False
-        self.accounts_file = f"{MAIL_ACCOUNTS_DIR}/user_{user_id}.json"
-        
-    async def init_session(self):
-        if not self.session:
-            connector = aiohttp.TCPConnector(limit=20, force_close=True, ssl=False)
-            timeout = aiohttp.ClientTimeout(total=30)
-            headers = {
-                "User-Agent": random.choice(USER_AGENTS),
-                "Accept": "application/json",
-                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
-            }
-            self.session = aiohttp.ClientSession(connector=connector, timeout=timeout, headers=headers)
+# ---------- EMAIL SENDER ----------
+class EmailSender:
+    def __init__(self):
+        self.senders = {}
+        self.load_config()
     
-    async def close(self):
-        if self.session:
-            await self.session.close()
-            self.session = None
-    
-    async def create_account(self) -> dict:
-        await self.init_session()
+    def load_config(self):
         try:
-            # Используем API temp-mail.org
-            domains = ["tofeat.com", "vintomaper.com", "fexbox.org", "digopm.com", "nuesond.com"]
-            domain = random.choice(domains)
-            
-            random_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
-            email = f"{random_str}@{domain}"
-            
-            # Генерируем уникальный хэш для аккаунта
-            md5_hash = hashlib.md5(email.encode()).hexdigest()
-            
-            return {
-                "email": email, 
-                "hash": md5_hash,
-                "created": time.time()
-            }
-        except Exception as e:
-            logger.error(f"Create account error for user {self.user_id}: {e}")
-        return None
-    
-    async def create_multiple_accounts(self, count: int) -> list:
-        accounts = []
-        for i in range(count):
-            account = await self.create_account()
-            if account:
-                accounts.append(account)
-                logger.info(f"User {self.user_id} - Mail {len(accounts)}/{count}: {account['email']}")
-            await asyncio.sleep(1)
-        self.accounts = accounts
-        self.ready = True
-        self.save_accounts()
-        return accounts
-    
-    def save_accounts(self):
-        os.makedirs(MAIL_ACCOUNTS_DIR, exist_ok=True)
-        with open(self.accounts_file, 'w') as f:
-            json.dump(self.accounts, f)
-    
-    def load_accounts(self):
-        try:
-            with open(self.accounts_file, 'r') as f:
-                self.accounts = json.load(f)
-                self.ready = True
-                return True
+            with open(MAIL_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                self.senders = json.load(f)
         except:
+            self.senders = {}
+            self.save_config()
+    
+    def save_config(self):
+        with open(MAIL_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self.senders, f, indent=4, ensure_ascii=False)
+    
+    def get_smtp_server(self, email: str) -> Tuple[str, int]:
+        domain = email.split('@')[1].lower()
+        if domain in SMTP_SERVERS:
+            return SMTP_SERVERS[domain]['server'], SMTP_SERVERS[domain]['port']
+        return 'smtp.mail.ru', 587
+    
+    def send_email(self, receiver: str, sender_email: str, sender_password: str, 
+                   subject: str, body: str) -> bool:
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = sender_email
+            msg['To'] = receiver
+            msg['Subject'] = Header(subject, 'utf-8')
+            msg.attach(MIMEText(body, 'plain', 'utf-8'))
+            
+            server_addr, port = self.get_smtp_server(sender_email)
+            
+            server = smtplib.SMTP(server_addr, port, timeout=30)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, receiver, msg.as_string())
+            server.quit()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Send error from {sender_email} to {receiver}: {e}")
             return False
     
-    async def send_email(self, account: dict, to_email: str, subject: str, body: str) -> bool:
-        await self.init_session()
+    def send_mass(self, receivers: List[str], subject: str, body: str) -> int:
+        sent_count = 0
         
-        # Пробуем разные методы отправки
-        methods = [
-            self._send_via_temp_mail_api,
-            self._send_via_mail_tm_api,
-            self._send_via_guerrilla_api
-        ]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = []
+            
+            for sender_email, sender_password in self.senders.items():
+                for receiver in receivers:
+                    future = executor.submit(
+                        self.send_email, 
+                        receiver, 
+                        sender_email, 
+                        sender_password, 
+                        subject, 
+                        body
+                    )
+                    futures.append((future, sender_email, receiver))
+                    time.sleep(2)
+            
+            for future, sender_email, receiver in futures:
+                try:
+                    if future.result():
+                        sent_count += 1
+                        logger.info(f"Sent: {sender_email} -> {receiver}")
+                except Exception as e:
+                    logger.error(f"Error: {sender_email} -> {receiver}: {e}")
         
-        for method in methods:
-            try:
-                result = await method(account, to_email, subject, body)
-                if result:
-                    return True
-            except Exception as e:
-                logger.error(f"Method {method.__name__} failed: {e}")
-        
-        return False
-    
-    async def _send_via_temp_mail_api(self, account: dict, to_email: str, subject: str, body: str) -> bool:
-        """Отправка через temp-mail.org API"""
-        try:
-            # Получаем токен
-            token_url = "https://api.temp-mail.org/request/domains/format/json"
-            async with self.session.get(token_url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    token = data.get("token", "")
-                    
-                    # Отправляем письмо
-                    send_data = {
-                        "from": account["email"],
-                        "to": to_email,
-                        "subject": subject,
-                        "text": body,
-                        "token": token
-                    }
-                    
-                    async with self.session.post(
-                        "https://api.temp-mail.org/request/mail/send",
-                        json=send_data
-                    ) as send_resp:
-                        if send_resp.status == 200:
-                            logger.info(f"Email sent from {account['email']} to {to_email}")
-                            return True
-        except Exception as e:
-            logger.error(f"Temp-mail API error: {e}")
-        return False
-    
-    async def _send_via_mail_tm_api(self, account: dict, to_email: str, subject: str, body: str) -> bool:
-        """Отправка через mail.tm API (если домен подходит)"""
-        if not account["email"].endswith("@inbox.testmail.app") and not account["email"].endswith("@mail.tm"):
-            return False
-            
-        try:
-            # Пробуем старый метод с mail.tm
-            message_data = {
-                "from": account["email"],
-                "to": [to_email],
-                "subject": subject,
-                "text": body
-            }
-            
-            headers = {
-                "Authorization": f"Bearer {account.get('token', '')}",
-                "Content-Type": "application/json"
-            }
-            
-            async with self.session.post(
-                "https://api.mail.tm/messages",
-                json=message_data,
-                headers=headers
-            ) as resp:
-                if resp.status in [200, 201, 202]:
-                    logger.info(f"Email sent via mail.tm from {account['email']} to {to_email}")
-                    return True
-        except Exception as e:
-            logger.error(f"Mail.tm API error: {e}")
-        return False
-    
-    async def _send_via_guerrilla_api(self, account: dict, to_email: str, subject: str, body: str) -> bool:
-        """Отправка через Guerrilla Mail API"""
-        try:
-            params = {
-                "f": "send_email",
-                "to": to_email,
-                "subject": subject,
-                "body": body
-            }
-            
-            # Добавляем sid_token если есть
-            if "sid_token" in account:
-                params["sid_token"] = account["sid_token"]
-            
-            headers = {
-                "User-Agent": random.choice(USER_AGENTS),
-                "Content-Type": "application/x-www-form-urlencoded"
-            }
-            
-            async with self.session.post(
-                "https://api.guerrillamail.com/ajax.php",
-                data=params,
-                headers=headers
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("status") == "success" or not data.get("needs_captcha"):
-                        logger.info(f"Email sent via Guerrilla from {account['email']} to {to_email}")
-                        return True
-        except Exception as e:
-            logger.error(f"Guerrilla API error: {e}")
-        return False
+        return sent_count
 
 
-# Замените функцию send_mass_complaint:
+email_sender = EmailSender()
 
-async def send_mass_complaint(user_id: int, subject: str, body: str) -> int:
-    mail_service = await get_user_mail_service(user_id)
-    
-    if not mail_service.ready or not mail_service.accounts:
-        logger.error(f"Mail service not ready for user {user_id}")
-        return 0
-    
-    sent = 0
-    accounts_to_use = mail_service.accounts[:MAIL_ACCOUNTS_PER_USER]
-    
-    semaphore = asyncio.Semaphore(2)  # Уменьшаем количество одновременных отправок
-    
-    async def send_one(acc, rec):
-        nonlocal sent
-        async with semaphore:
-            try:
-                result = await mail_service.send_email(acc, rec, subject, body)
-                if result:
-                    nonlocal sent
-                    sent += 1
-                    logger.info(f"Successfully sent from {acc['email']} to {rec}")
-                return result
-            except Exception as e:
-                logger.error(f"Send error from {acc['email']}: {e}")
-                return False
-    
-    tasks = []
-    for acc in accounts_to_use:
-        for rec in RECEIVERS:
-            tasks.append(send_one(acc, rec))
-            await asyncio.sleep(2)  # Большая задержка
-    
-    if tasks:
-        # Отправляем маленькими партиями
-        batch_size = 2
-        for i in range(0, len(tasks), batch_size):
-            batch = tasks[i:i+batch_size]
-            await asyncio.gather(*batch, return_exceptions=True)
-            await asyncio.sleep(5)  # Большая задержка между партиями
-        
-        logger.info(f"User {user_id} sent {sent} emails")
-    
-    if user_id:
-        add_log(user_id, "Снос почта", f"{sent} писем")
-    
-    return sent
 
 # ---------- СЕССИИ ----------
 def get_user_session_dir(user_id: int) -> str:
@@ -892,52 +743,6 @@ async def mass_report_message(user_id: int, link: str, reason: str, progress_cal
     return ok, None
 
 
-# ---------- СНОС ПОЧТЫ ----------
-async def send_mass_complaint(user_id: int, subject: str, body: str) -> int:
-    mail_service = await get_user_mail_service(user_id)
-    
-    if not mail_service.ready or not mail_service.accounts:
-        logger.error(f"Mail service not ready for user {user_id}")
-        return 0
-    
-    sent = 0
-    accounts_to_use = mail_service.accounts[:MAIL_ACCOUNTS_PER_USER]
-    
-    semaphore = asyncio.Semaphore(3)
-    
-    async def send_one(acc, rec):
-        nonlocal sent
-        async with semaphore:
-            try:
-                result = await mail_service.send_email(acc, rec, subject, body)
-                if result:
-                    sent += 1
-                return result
-            except Exception as e:
-                logger.error(f"Send error: {e}")
-                return False
-    
-    tasks = []
-    for acc in accounts_to_use:
-        for rec in RECEIVERS:
-            tasks.append(send_one(acc, rec))
-            await asyncio.sleep(1)
-    
-    if tasks:
-        batch_size = 5
-        for i in range(0, len(tasks), batch_size):
-            batch = tasks[i:i+batch_size]
-            await asyncio.gather(*batch, return_exceptions=True)
-            await asyncio.sleep(2)
-        
-        logger.info(f"User {user_id} sent {sent} emails")
-    
-    if user_id:
-        add_log(user_id, "Снос почта", f"{sent} писем")
-    
-    return sent
-
-
 # ---------- TELEGRAPH ФИШИНГ ----------
 async def create_telegraph_page_fast(title: str, description: str, button_text: str, chat_id: int, page_id: str) -> Optional[str]:
     try:
@@ -1011,9 +816,8 @@ def get_mail_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="ЖАЛОБА НА АККАУНТ", callback_data="mail_acc")
     builder.button(text="ЖАЛОБА НА КАНАЛ", callback_data="mail_chan")
-    builder.button(text="СОЗДАТЬ ПОЧТЫ", callback_data="mail_create")
     builder.button(text="НАЗАД", callback_data="main_menu")
-    builder.adjust(1, 1, 1, 1)
+    builder.adjust(1, 1, 1)
     return builder.as_markup()
 
 def get_mail_account_menu():
@@ -1141,25 +945,8 @@ async def bomber_menu(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "mail_menu")
 async def mail_menu(cb: types.CallbackQuery):
-    user_id = cb.from_user.id
-    mail_service = user_mail_services.get(user_id)
-    accounts_count = len(mail_service.accounts) if mail_service and mail_service.ready else 0
-    await edit_message_with_banner(cb, f"<b>СНОС ПОЧТА</b>\n\nАккаунтов: {accounts_count}/{MAIL_ACCOUNTS_PER_USER}", get_mail_menu())
+    await edit_message_with_banner(cb, f"<b>СНОС ПОЧТА</b>\n\nОтправителей: {len(email_sender.senders)}", get_mail_menu())
     await cb.answer()
-
-@dp.callback_query(F.data == "mail_create")
-async def mail_create(cb: types.CallbackQuery):
-    user_id = cb.from_user.id
-    await cb.answer("Создание 20 почтовых аккаунтов...")
-    
-    if user_id in user_mail_services:
-        await user_mail_services[user_id].close()
-        del user_mail_services[user_id]
-    
-    mail_service = await get_user_mail_service(user_id)
-    await mail_service.create_multiple_accounts(MAIL_ACCOUNTS_PER_USER)
-    
-    await edit_message_with_banner(cb, f"<b>СОЗДАНО {len(mail_service.accounts)} ПОЧТ</b>", get_mail_menu())
 
 @dp.callback_query(F.data == "report_menu")
 async def report_menu(cb: types.CallbackQuery):
@@ -1253,11 +1040,9 @@ async def refresh_sessions(cb: types.CallbackQuery):
 @dp.callback_query(F.data == "status")
 async def status(cb: types.CallbackQuery):
     user_id = cb.from_user.id
-    mail_service = user_mail_services.get(user_id)
-    mail_count = len(mail_service.accounts) if mail_service and mail_service.ready else 0
     await edit_message_with_banner(
         cb, 
-        f"<b>СТАТУС</b>\n\nID: <code>{user_id}</code>\nСессии: {get_user_sessions_count(user_id)}/{SESSIONS_PER_USER}\nПочты: {mail_count}/{MAIL_ACCOUNTS_PER_USER}",
+        f"<b>СТАТУС</b>\n\nID: <code>{user_id}</code>\nСессии: {get_user_sessions_count(user_id)}/{SESSIONS_PER_USER}",
         InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="main_menu")]])
     )
 
@@ -1529,26 +1314,28 @@ async def mail_acc_id(msg: types.Message, state: FSMContext):
     )
     subject = f"Жалоба на аккаунт @{username} | Telegram"
     
+    if not email_sender.senders:
+        await send_message_with_banner(msg, "<b>ОШИБКА</b>\n\nНет отправителей! Добавьте почты в mail_config.json", get_main_menu())
+        return
+    
     st = await send_message_with_banner(msg, "<b>Отправка жалоб...</b>\n\nПожалуйста, подождите...")
-    sent = await send_mass_complaint(user_id, subject, body)
+    
+    loop = asyncio.get_event_loop()
+    sent = await loop.run_in_executor(None, email_sender.send_mass, RECEIVERS, subject, body)
+    
     await st.delete()
     
-    if sent > 0:
-        await send_message_with_banner(
-            msg,
-            f"<b>ЖАЛОБЫ ОТПРАВЛЕНЫ!</b>\n\n"
-            f"Аккаунт: @{username}\n"
-            f"ID: <code>{telegram_id}</code>\n"
-            f"Тип: {complaint_type}\n"
-            f"Отправлено: <b>{sent}</b> писем",
-            get_main_menu()
-        )
-    else:
-        await send_message_with_banner(
-            msg,
-            f"<b>ОШИБКА ОТПРАВКИ</b>\n\nНе удалось отправить жалобы.\nПроверьте наличие почтовых аккаунтов в меню СНОС ПОЧТА -> СОЗДАТЬ ПОЧТЫ",
-            get_main_menu()
-        )
+    add_log(user_id, "Снос почта (аккаунт)", f"@{username} - {sent} писем")
+    
+    await send_message_with_banner(
+        msg,
+        f"<b>ЖАЛОБЫ ОТПРАВЛЕНЫ!</b>\n\n"
+        f"Аккаунт: @{username}\n"
+        f"ID: <code>{telegram_id}</code>\n"
+        f"Тип: {complaint_type}\n"
+        f"Отправлено: <b>{sent}</b> писем",
+        get_main_menu()
+    )
 
 @dp.callback_query(F.data == "mail_chan")
 async def mail_chan_menu(cb: types.CallbackQuery):
@@ -1592,26 +1379,28 @@ async def mail_chan_violation(msg: types.Message, state: FSMContext):
     )
     subject = f"Жалоба на канал Telegram | Нарушение правил"
     
+    if not email_sender.senders:
+        await send_message_with_banner(msg, "<b>ОШИБКА</b>\n\nНет отправителей! Добавьте почты в mail_config.json", get_main_menu())
+        return
+    
     st = await send_message_with_banner(msg, "<b>Отправка жалоб...</b>\n\nПожалуйста, подождите...")
-    sent = await send_mass_complaint(user_id, subject, body)
+    
+    loop = asyncio.get_event_loop()
+    sent = await loop.run_in_executor(None, email_sender.send_mass, RECEIVERS, subject, body)
+    
     await st.delete()
     
-    if sent > 0:
-        await send_message_with_banner(
-            msg,
-            f"<b>ЖАЛОБЫ ОТПРАВЛЕНЫ!</b>\n\n"
-            f"Канал: {channel}\n"
-            f"Нарушение: {violation}\n"
-            f"Тип жалобы: {complaint_type}\n"
-            f"Отправлено: <b>{sent}</b> писем",
-            get_main_menu()
-        )
-    else:
-        await send_message_with_banner(
-            msg,
-            f"<b>ОШИБКА ОТПРАВКИ</b>\n\nНе удалось отправить жалобы.\nПроверьте наличие почтовых аккаунтов в меню СНОС ПОЧТА -> СОЗДАТЬ ПОЧТЫ",
-            get_main_menu()
-        )
+    add_log(user_id, "Снос почта (канал)", f"{channel} - {sent} писем")
+    
+    await send_message_with_banner(
+        msg,
+        f"<b>ЖАЛОБЫ ОТПРАВЛЕНЫ!</b>\n\n"
+        f"Канал: {channel}\n"
+        f"Нарушение: {violation}\n"
+        f"Тип жалобы: {complaint_type}\n"
+        f"Отправлено: <b>{sent}</b> писем",
+        get_main_menu()
+    )
 
 @dp.callback_query(F.data == "phish_create")
 async def phish_create_start(cb: types.CallbackQuery, state: FSMContext):
@@ -1712,7 +1501,6 @@ async def handle_photo(msg: types.Message):
 # ---------- ЗАПУСК ----------
 async def main():
     load_allowed_users()
-    os.makedirs(MAIL_ACCOUNTS_DIR, exist_ok=True)
     logger.info("VICTIM SNOS запуск")
     
     await bot.delete_webhook(drop_pending_updates=True)
