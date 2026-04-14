@@ -38,7 +38,7 @@ from pyrogram.raw.functions.account import ReportPeer
 from pyrogram.raw.types import InputReportReasonSpam, InputReportReasonViolence, InputReportReasonPornography
 
 # ---------- НАСТРОЙКИ ----------
-BOT_TOKEN = "8788795304:AAE8a0TEsRw8aRhflGIrIQoJZIZf1ZErcA0"
+BOT_TOKEN = "8788795304:AAFA9drMeBOVHp-OR0XWgrZPllVsXx9zgqI"
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
