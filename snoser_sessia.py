@@ -36,7 +36,7 @@ import pyrogram.raw.types as raw_types
 from pyrogram.raw.functions.account import ReportPeer
 
 # ---------- НАСТРОЙКИ ----------
-BOT_TOKEN = "8788795304:AAE8a0TEsRw8aRhflGIrIQoJZIZf1ZErcA0"
+BOT_TOKEN = "8788795304:AAFA9drMeBOVHp-OR0XWgrZPllVsXx9zgqI"
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 ADMIN_ID = 7736817432
@@ -63,7 +63,7 @@ BOMBER_DELAY = 0.5
 REQUEST_TIMEOUT = 30
 
 MAIL_CONFIG_FILE = "mail_config.json"
-BANNER_PATH = "Banner.png"
+BANNER_PATH = "banner.png"
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
