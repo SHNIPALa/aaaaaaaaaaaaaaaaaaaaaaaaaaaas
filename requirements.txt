@@ -1,8 +1,25 @@
+# requirements.txt для VICTIM SNOS - Telegram Bomber
 
-pyTelegramBotAPI
-requests
-aiogram==3.7.0
+# Основные зависимости
+aiogram==3.4.1
 pyrogram==2.0.106
 tgcrypto==1.2.5
+
+# Асинхронность и производительность
+uvloop==0.19.0
 aiohttp==3.9.5
-fake-useragent==1.5.1
+aiofiles==23.2.1
+
+# Работа с данными
+redis==5.0.3
+python-json-logger==2.0.7
+
+# Дополнительные утилиты
+python-dotenv==1.0.0
+colorama==0.4.6
+tqdm==4.66.2
+
+# Опционально для лучшей производительности
+orjson==3.9.15
+aiodns==3.1.1
+cchardet==2.1.7
