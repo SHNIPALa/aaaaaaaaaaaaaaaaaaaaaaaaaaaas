@@ -1,4 +1,4 @@
-# requirements.txt для VICTIM SNOS - Telegram Bomber
+# requirements.txt - исправленная версия без проблемных зависимостей
 
 # Основные зависимости
 aiogram==3.4.1
@@ -21,5 +21,6 @@ tqdm==4.66.2
 
 # Опционально для лучшей производительности
 orjson==3.9.15
-aiodns==3.1.1
-cchardet==2.1.7
+
+# Примечание: cchardet удален из-за проблем с компиляцией
+# Вместо него aiohttp использует встроенный charset-normalizer
